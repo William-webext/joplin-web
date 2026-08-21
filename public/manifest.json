@@ -1,0 +1,15 @@
+{
+  "short_name": "JoplinWeb",
+  "name": "Joplin Web App",
+  "icons": [
+    {
+      "src": "https://joplinapp.org/images/Icon512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#1e1e1e",
+  "theme_color": "#0e639c",
+  "display": "standalone"
+}
