@@ -118,12 +118,15 @@
 </head>
 <body class="view-sidebar">
 
+   <!-- OVERLAY LOGIN -->
     <div id="login-overlay">
-        <h2 style="margin-bottom: 5px;">Joplin Web Access</h2>
-        <p style="color: #888; margin-bottom: 20px;">Inserisci le tue credenziali</p>
-        <input type="email" id="emailInput" class="login-input" placeholder="Email">
-        <input type="password" id="passwordInput" class="login-input" placeholder="Password">
-        <button class="login-btn" onclick="performLogin()">Accedi alle Note</button>
+        <form onsubmit="event.preventDefault(); performLogin();" style="display: flex; flex-direction: column; align-items: center;">
+            <h2 style="margin-bottom: 5px;">Joplin Web Access</h2>
+            <p style="color: #888; margin-bottom: 20px;">Inserisci le tue credenziali</p>
+            <input type="email" id="emailInput" class="login-input" placeholder="Email" required>
+            <input type="password" id="passwordInput" class="login-input" placeholder="Password" required>
+            <button type="submit" class="login-btn">Accedi alle Note</button>
+        </form>
     </div>
 
     <div id="lightbox" onclick="closeLightbox()">
