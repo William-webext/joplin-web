@@ -58,20 +58,27 @@ app.post('/api/login', async (req, res) => {
 // L'API principale: chiede le note di un utente specifico
 // L'API principale: chiede le note, i taccuini e i TAG
 // L'API principale: chiede le note, i taccuini e i TAG (inclusi quelli condivisi)
+// L'API principale: chiede le note, i taccuini e i TAG (propri e condivisi)
 app.get('/api/data/:owner_id', async (req, res) => {
   const ownerId = req.params.owner_id;
   
   try {
-    // Selezioniamo gli elementi di proprietà dell'utente (owner_id) 
-    // e quelli condivisi con lui (presenti nella tabella user_items)
-    const result = await pool.query(
-      `SELECT DISTINCT i.jop_id, i.jop_parent_id, i.jop_type, i.content 
-       FROM items i
-       LEFT JOIN user_items ui ON (ui.item_id = i.id OR ui.item_id = i.jop_id)
-       WHERE (i.owner_id = $1 OR ui.user_id = $1)
-         AND i.jop_type IN (1, 2, 5, 6)`,
-      [ownerId]
-    );
+    const queryText = `
+      SELECT DISTINCT i.jop_id, i.jop_parent_id, i.jop_type, i.content 
+      FROM items i
+      LEFT JOIN user_items ui ON (ui.item_id = i.id OR ui.item_id = i.jop_id)
+      LEFT JOIN shares s ON (s.item_id = i.id OR s.item_id = i.jop_id OR s.folder_id = i.jop_id)
+      LEFT JOIN share_users su ON su.share_id = s.id
+      WHERE (
+        i.owner_id = $1 
+        OR ui.user_id = $1 
+        OR su.user_id = $1
+        OR i.jop_type IN (5, 6)
+      )
+      AND i.jop_type IN (1, 2, 5, 6)
+    `;
+
+    const result = await pool.query(queryText, [ownerId]);
 
     const folders = [];
     const notes = [];
@@ -86,16 +93,29 @@ app.get('/api/data/:owner_id', async (req, res) => {
 
       if (parsedContent.deleted_time && parsedContent.deleted_time > 0) return; 
 
+      const effectiveParentId = row.jop_parent_id || parsedContent.parent_id || '';
+
       if (row.jop_type === 2) {
         let extractedIcon = '';
         if (parsedContent.icon) {
             try { extractedIcon = JSON.parse(parsedContent.icon).emoji || ''; } 
             catch (e) { extractedIcon = parsedContent.icon; }
         }
-        folders.push({ id: row.jop_id, parent_id: row.jop_parent_id, icon: extractedIcon, title: parsedContent.title || 'Senza Titolo' });
+        folders.push({ 
+          id: row.jop_id, 
+          parent_id: effectiveParentId, 
+          icon: extractedIcon, 
+          title: parsedContent.title || 'Senza Titolo' 
+        });
       } 
       else if (row.jop_type === 1) {
-        notes.push({ id: row.jop_id, parent_id: row.jop_parent_id, title: parsedContent.title || 'Nuova Nota', body: parsedContent.body || '', updated_time: Number(parsedContent.user_updated_time || parsedContent.updated_time || 0) });
+        notes.push({ 
+          id: row.jop_id, 
+          parent_id: effectiveParentId, 
+          title: parsedContent.title || 'Nuova Nota', 
+          body: parsedContent.body || '', 
+          updated_time: Number(parsedContent.user_updated_time || parsedContent.updated_time || 0) 
+        });
       }
       else if (row.jop_type === 5) {
         tags.push({ id: row.jop_id, title: parsedContent.title || 'Tag' });
