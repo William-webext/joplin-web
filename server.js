@@ -40,23 +40,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// ENDPOINT DI DEBUG (Mostra lo stato del file dei dati direttamente nel browser)
-app.get('/api/debug', (req, res) => {
-  const data = getPublishedData();
-  res.json({
-    filePath: PUBLISHED_DATA_FILE,
-    fileExists: fs.existsSync(PUBLISHED_DATA_FILE),
-    foldersCount: data.folders ? data.folders.length : 0,
-    notesCount: data.notes ? data.notes.length : 0,
-    rawContent: data
-  });
-});
-
 // RECEIVE PUBLISH FROM PLUGIN
 app.post('/api/publish', (req, res) => {
   const { folder, notes } = req.body;
-
-  console.log("📥 Ricevuta richiesta di pubblicazione:", folder);
 
   if (!folder || !folder.id || !notes) {
     return res.status(400).json({ error: 'Dati incompleti' });
@@ -64,7 +50,6 @@ app.post('/api/publish', (req, res) => {
 
   const currentData = getPublishedData();
 
-  // Rimuove vecchie versioni del taccuino
   currentData.folders = currentData.folders.filter(f => f.id !== folder.id);
   currentData.notes = currentData.notes.filter(n => n.parent_id !== folder.id);
 
@@ -86,7 +71,6 @@ app.post('/api/publish', (req, res) => {
   });
 
   savePublishedData(currentData);
-  console.log("💾 Dati salvati con successo. Taccuini totali:", currentData.folders.length);
   res.json({ success: true, message: 'Taccuino pubblicato correttamente' });
 });
 
@@ -107,17 +91,131 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// API PUBLISHED DATA
-app.get('/api/published-data', (req, res) => {
+// UNIFIED DATA FETCHING (LIVE DB + PUBLISHED)
+app.get('/api/data', async (req, res) => {
   const userId = req.query.userId;
   const isAuth = !!userId;
-  const data = getPublishedData();
 
-  const visibleFolders = data.folders.filter(f => isAuth || f.visibility === 'public');
-  const visibleFolderIds = visibleFolders.map(f => f.id);
-  const visibleNotes = data.notes.filter(n => visibleFolderIds.includes(n.parent_id));
+  let allFolders = [];
+  let allNotes = [];
+  let tags = [];
+  let noteTags = [];
 
-  res.json({ folders: visibleFolders, notes: visibleNotes, isAuth });
+  // 1. CARICAMENTO DATI PUBBLICATI DA PLUGIN (JSON)
+  const publishedData = getPublishedData();
+  const visiblePublishedFolders = publishedData.folders.filter(f => isAuth || f.visibility === 'public');
+  const visiblePublishedFolderIds = visiblePublishedFolders.map(f => f.id);
+  const visiblePublishedNotes = publishedData.notes.filter(n => visiblePublishedFolderIds.includes(n.parent_id));
+
+  visiblePublishedFolders.forEach(f => {
+    const iconTag = f.visibility === 'public' ? '🌍' : '🔒';
+    allFolders.push({
+      id: f.id,
+      parent_id: '',
+      icon: iconTag,
+      title: `${f.title} (Pubblicato)`,
+      isPublished: true
+    });
+  });
+
+  visiblePublishedNotes.forEach(n => {
+    allNotes.push({
+      id: n.id,
+      parent_id: n.parent_id,
+      title: n.title,
+      body: n.body,
+      updated_time: n.updated_time,
+      tags: ['Pubblicato']
+    });
+  });
+
+  // 2. CARICAMENTO DATI LIVE DA POSTGRESQL (SOLO SE AUTENTICATO)
+  if (isAuth) {
+    try {
+      const queryText = `
+        SELECT DISTINCT i.jop_id, i.jop_parent_id, i.jop_type, i.content 
+        FROM items i
+        LEFT JOIN user_items ui ON (ui.item_id = i.id OR ui.item_id = i.jop_id)
+        LEFT JOIN shares s ON (s.item_id = i.id OR s.item_id = i.jop_id OR s.folder_id = i.jop_id)
+        LEFT JOIN share_users su ON su.share_id = s.id
+        WHERE (
+          i.owner_id = $1 
+          OR ui.user_id = $1 
+          OR su.user_id = $1
+          OR i.jop_type IN (5, 6)
+        )
+        AND i.jop_type IN (1, 2, 5, 6)
+      `;
+
+      const result = await pool.query(queryText, [userId]);
+      let foldersRaw = [];
+
+      result.rows.forEach(row => {
+        let parsedContent = {};
+        try { parsedContent = JSON.parse(row.content.toString('utf-8')); } catch (e) { return; }
+
+        if (Number(parsedContent.deleted_time || 0) > 0 || 
+            Number(parsedContent.user_deleted_time || 0) > 0 || 
+            Number(parsedContent.is_conflict || 0) > 0 || 
+            parsedContent.in_trash || parsedContent.is_trash) return;
+
+        const effectiveParentId = row.jop_parent_id || parsedContent.parent_id || '';
+
+        if (row.jop_type === 2) {
+          let extractedIcon = '';
+          if (parsedContent.icon) {
+              try { extractedIcon = JSON.parse(parsedContent.icon).emoji || ''; } catch (e) { extractedIcon = parsedContent.icon; }
+          }
+          foldersRaw.push({ 
+            id: row.jop_id, 
+            parent_id: effectiveParentId, 
+            icon: extractedIcon || '📁', 
+            title: parsedContent.title || 'Senza Titolo',
+            isPublished: false
+          });
+        } 
+        else if (row.jop_type === 1) {
+          allNotes.push({ 
+            id: row.jop_id, 
+            parent_id: effectiveParentId, 
+            title: parsedContent.title || 'Nuova Nota', 
+            body: parsedContent.body || '', 
+            updated_time: Number(parsedContent.user_updated_time || parsedContent.updated_time || 0) 
+          });
+        }
+        else if (row.jop_type === 5) {
+          tags.push({ id: row.jop_id, title: parsedContent.title || 'Tag' });
+        }
+        else if (row.jop_type === 6) {
+          noteTags.push({ note_id: parsedContent.note_id, tag_id: parsedContent.tag_id });
+        }
+      });
+
+      // Filtro orfani PostgreSQL
+      const folderMap = new Map(foldersRaw.map(f => [f.id, f]));
+      foldersRaw.forEach(f => {
+        let current = f;
+        let isOrphan = false;
+        while (current.parent_id) {
+          if (!folderMap.has(current.parent_id)) { isOrphan = true; break; }
+          current = folderMap.get(current.parent_id);
+        }
+        if (!isOrphan) allFolders.push(f);
+      });
+
+      allNotes.forEach(note => {
+        if(!note.tags) {
+          const myTagIds = noteTags.filter(nt => nt.note_id === note.id).map(nt => nt.tag_id);
+          note.tags = tags.filter(t => myTagIds.includes(t.id)).map(t => t.title);
+        }
+      });
+
+    } catch (err) {
+      console.error("Errore lettura DB Live:", err);
+    }
+  }
+
+  res.json({ folders: allFolders, notes: allNotes, isAuth });
 });
 
 // RESOURCE DOWNLOAD API
