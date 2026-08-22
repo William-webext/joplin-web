@@ -9,7 +9,13 @@ app.use(express.static('public'));
 app.use(express.json({ limit: '50mb' })); 
 const port = 3000;
 
-const PUBLISHED_DATA_FILE = path.join(__dirname, 'published_notebooks.json');
+// Gestione cartella dati persistente
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+const PUBLISHED_DATA_FILE = path.join(DATA_DIR, 'published_notebooks.json');
 
 if (!fs.existsSync(PUBLISHED_DATA_FILE)) {
   fs.writeFileSync(PUBLISHED_DATA_FILE, JSON.stringify({ folders: [], notes: [] }, null, 2));
@@ -101,7 +107,7 @@ app.get('/api/data', async (req, res) => {
   let tags = [];
   let noteTags = [];
 
-  // 1. CARICAMENTO DATI PUBBLICATI DA PLUGIN (JSON)
+  // 1. Taccuini Pubblicati (JSON Persistente)
   const publishedData = getPublishedData();
   const visiblePublishedFolders = publishedData.folders.filter(f => isAuth || f.visibility === 'public');
   const visiblePublishedFolderIds = visiblePublishedFolders.map(f => f.id);
@@ -129,7 +135,7 @@ app.get('/api/data', async (req, res) => {
     });
   });
 
-  // 2. CARICAMENTO DATI LIVE DA POSTGRESQL (SOLO SE AUTENTICATO)
+  // 2. Taccuini Live da PostgreSQL (Solo se Autenticato)
   if (isAuth) {
     try {
       const queryText = `
@@ -191,7 +197,6 @@ app.get('/api/data', async (req, res) => {
         }
       });
 
-      // Filtro orfani PostgreSQL
       const folderMap = new Map(foldersRaw.map(f => [f.id, f]));
       foldersRaw.forEach(f => {
         let current = f;
@@ -216,6 +221,18 @@ app.get('/api/data', async (req, res) => {
   }
 
   res.json({ folders: allFolders, notes: allNotes, isAuth });
+});
+
+// DEBUG ENDPOINT
+app.get('/api/debug', (req, res) => {
+  const data = getPublishedData();
+  res.json({
+    dataDir: DATA_DIR,
+    filePath: PUBLISHED_DATA_FILE,
+    fileExists: fs.existsSync(PUBLISHED_DATA_FILE),
+    foldersCount: data.folders ? data.folders.length : 0,
+    notesCount: data.notes ? data.notes.length : 0
+  });
 });
 
 // RESOURCE DOWNLOAD API
