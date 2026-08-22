@@ -40,9 +40,23 @@ app.use((req, res, next) => {
   next();
 });
 
-// RECEIVE PUBLISH FROM PLUGIN (SENZA CONTROLLO CHIAVE)
+// ENDPOINT DI DEBUG (Mostra lo stato del file dei dati direttamente nel browser)
+app.get('/api/debug', (req, res) => {
+  const data = getPublishedData();
+  res.json({
+    filePath: PUBLISHED_DATA_FILE,
+    fileExists: fs.existsSync(PUBLISHED_DATA_FILE),
+    foldersCount: data.folders ? data.folders.length : 0,
+    notesCount: data.notes ? data.notes.length : 0,
+    rawContent: data
+  });
+});
+
+// RECEIVE PUBLISH FROM PLUGIN
 app.post('/api/publish', (req, res) => {
   const { folder, notes } = req.body;
+
+  console.log("📥 Ricevuta richiesta di pubblicazione:", folder);
 
   if (!folder || !folder.id || !notes) {
     return res.status(400).json({ error: 'Dati incompleti' });
@@ -50,6 +64,7 @@ app.post('/api/publish', (req, res) => {
 
   const currentData = getPublishedData();
 
+  // Rimuove vecchie versioni del taccuino
   currentData.folders = currentData.folders.filter(f => f.id !== folder.id);
   currentData.notes = currentData.notes.filter(n => n.parent_id !== folder.id);
 
@@ -71,6 +86,7 @@ app.post('/api/publish', (req, res) => {
   });
 
   savePublishedData(currentData);
+  console.log("💾 Dati salvati con successo. Taccuini totali:", currentData.folders.length);
   res.json({ success: true, message: 'Taccuino pubblicato correttamente' });
 });
 
