@@ -97,7 +97,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// UNIFIED DATA FETCHING (LIVE DB + PUBLISHED)
+// UNIFIED DATA FETCHING WITH AUTOMATIC DEDUPLICATION
 app.get('/api/data', async (req, res) => {
   const userId = req.query.userId;
   const isAuth = !!userId;
@@ -107,35 +107,10 @@ app.get('/api/data', async (req, res) => {
   let tags = [];
   let noteTags = [];
 
-  // 1. Taccuini Pubblicati (JSON Persistente)
-  const publishedData = getPublishedData();
-  const visiblePublishedFolders = publishedData.folders.filter(f => isAuth || f.visibility === 'public');
-  const visiblePublishedFolderIds = visiblePublishedFolders.map(f => f.id);
-  const visiblePublishedNotes = publishedData.notes.filter(n => visiblePublishedFolderIds.includes(n.parent_id));
+  const folderIdsSet = new Set();
+  const noteIdsSet = new Set();
 
-  visiblePublishedFolders.forEach(f => {
-    const iconTag = f.visibility === 'public' ? '🌍' : '🔒';
-    allFolders.push({
-      id: f.id,
-      parent_id: '',
-      icon: iconTag,
-      title: `${f.title} (Pubblicato)`,
-      isPublished: true
-    });
-  });
-
-  visiblePublishedNotes.forEach(n => {
-    allNotes.push({
-      id: n.id,
-      parent_id: n.parent_id,
-      title: n.title,
-      body: n.body,
-      updated_time: n.updated_time,
-      tags: ['Pubblicato']
-    });
-  });
-
-  // 2. Taccuini Live da PostgreSQL (Solo se Autenticato)
+  // 1. CARICAMENTO DATI LIVE DA POSTGRESQL (SE AUTENTICATO)
   if (isAuth) {
     try {
       const queryText = `
@@ -188,6 +163,7 @@ app.get('/api/data', async (req, res) => {
             body: parsedContent.body || '', 
             updated_time: Number(parsedContent.user_updated_time || parsedContent.updated_time || 0) 
           });
+          noteIdsSet.add(row.jop_id);
         }
         else if (row.jop_type === 5) {
           tags.push({ id: row.jop_id, title: parsedContent.title || 'Tag' });
@@ -197,6 +173,7 @@ app.get('/api/data', async (req, res) => {
         }
       });
 
+      // Filtro taccuini orfani PostgreSQL
       const folderMap = new Map(foldersRaw.map(f => [f.id, f]));
       foldersRaw.forEach(f => {
         let current = f;
@@ -205,20 +182,64 @@ app.get('/api/data', async (req, res) => {
           if (!folderMap.has(current.parent_id)) { isOrphan = true; break; }
           current = folderMap.get(current.parent_id);
         }
-        if (!isOrphan) allFolders.push(f);
+        if (!isOrphan) {
+          allFolders.push(f);
+          folderIdsSet.add(f.id);
+        }
       });
 
       allNotes.forEach(note => {
-        if(!note.tags) {
-          const myTagIds = noteTags.filter(nt => nt.note_id === note.id).map(nt => nt.tag_id);
-          note.tags = tags.filter(t => myTagIds.includes(t.id)).map(t => t.title);
-        }
+        const myTagIds = noteTags.filter(nt => nt.note_id === note.id).map(nt => nt.tag_id);
+        note.tags = tags.filter(t => myTagIds.includes(t.id)).map(t => t.title);
       });
 
     } catch (err) {
       console.error("Errore lettura DB Live:", err);
     }
   }
+
+  // 2. UNIONE DATI PUBBLICATI (EVITANDO DUPLICATI)
+  const publishedData = getPublishedData();
+  const visiblePublishedFolders = publishedData.folders.filter(f => isAuth || f.visibility === 'public');
+
+  visiblePublishedFolders.forEach(f => {
+    if (folderIdsSet.has(f.id)) {
+      // Se il taccuino esiste già nel DB live, aggiorniamo l'icona sul taccuino esistente
+      const existingFolder = allFolders.find(folder => folder.id === f.id);
+      if (existingFolder) {
+        existingFolder.isPublished = true;
+        existingFolder.icon = f.visibility === 'public' ? '🌍' : '🔒';
+      }
+    } else {
+      // Se il taccuino è stato pubblicato ed è di un altro utente (o non è nel DB live)
+      const iconTag = f.visibility === 'public' ? '🌍' : '🔒';
+      allFolders.push({
+        id: f.id,
+        parent_id: '',
+        icon: iconTag,
+        title: `${f.title} (Pubblicato)`,
+        isPublished: true
+      });
+      folderIdsSet.add(f.id);
+    }
+  });
+
+  const visiblePublishedFolderIds = visiblePublishedFolders.map(f => f.id);
+  const visiblePublishedNotes = publishedData.notes.filter(n => visiblePublishedFolderIds.includes(n.parent_id));
+
+  visiblePublishedNotes.forEach(n => {
+    if (!noteIdsSet.has(n.id)) {
+      allNotes.push({
+        id: n.id,
+        parent_id: n.parent_id,
+        title: n.title,
+        body: n.body,
+        updated_time: n.updated_time,
+        tags: ['Pubblicato']
+      });
+      noteIdsSet.add(n.id);
+    }
+  });
 
   res.json({ folders: allFolders, notes: allNotes, isAuth });
 });
