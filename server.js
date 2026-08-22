@@ -10,27 +10,23 @@ app.use(express.json({ limit: '50mb' }));
 const port = 3000;
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const PUBLISHED_DATA_FILE = path.join(DATA_DIR, 'published_notebooks.json');
+const GROUPS_DATA_FILE = path.join(DATA_DIR, 'groups.json');
 
-if (!fs.existsSync(PUBLISHED_DATA_FILE)) {
-  fs.writeFileSync(PUBLISHED_DATA_FILE, JSON.stringify({ folders: [], notes: [] }, null, 2));
-}
+if (!fs.existsSync(PUBLISHED_DATA_FILE)) fs.writeFileSync(PUBLISHED_DATA_FILE, JSON.stringify({ folders: [], notes: [] }, null, 2));
+if (!fs.existsSync(GROUPS_DATA_FILE)) fs.writeFileSync(GROUPS_DATA_FILE, JSON.stringify([], null, 2));
 
 function getPublishedData() {
-  try {
-    return JSON.parse(fs.readFileSync(PUBLISHED_DATA_FILE, 'utf-8'));
-  } catch (e) {
-    return { folders: [], notes: [] };
-  }
+  try { return JSON.parse(fs.readFileSync(PUBLISHED_DATA_FILE, 'utf-8')); } catch (e) { return { folders: [], notes: [] }; }
 }
+function savePublishedData(data) { fs.writeFileSync(PUBLISHED_DATA_FILE, JSON.stringify(data, null, 2)); }
 
-function savePublishedData(data) {
-  fs.writeFileSync(PUBLISHED_DATA_FILE, JSON.stringify(data, null, 2));
+function getGroupsData() {
+  try { return JSON.parse(fs.readFileSync(GROUPS_DATA_FILE, 'utf-8')); } catch (e) { return []; }
 }
+function saveGroupsData(groups) { fs.writeFileSync(GROUPS_DATA_FILE, JSON.stringify(groups, null, 2)); }
 
 const pool = new Pool({
   user: process.env.DB_USER || 'joplinuser',
@@ -45,26 +41,45 @@ app.use((req, res, next) => {
   next();
 });
 
-// LISTA DEI TACCUINI PUBBLICATI PER IL PANNELLO DEL PLUGIN
+// API PER RECUPERO UTENTI E GRUPPI (Usata dal Plugin e dalla WebApp)
+app.get('/api/users-and-groups', async (req, res) => {
+  try {
+    const userRes = await pool.query('SELECT id, email, is_admin FROM users ORDER BY email ASC');
+    const groups = getGroupsData();
+    res.json({ users: userRes.rows, groups });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore lettura utenti/gruppi' });
+  }
+});
+
+// API SALVATAGGIO GRUPPI (ADMIN)
+app.post('/api/admin/groups', async (req, res) => {
+  const { groups } = req.body;
+  if (!Array.isArray(groups)) return res.status(400).json({ error: 'Dati non validi' });
+  saveGroupsData(groups);
+  res.json({ success: true });
+});
+
+// LISTA PUBBLICAZIONI PER IL PANNELLO PLUGIN
 app.get('/api/published-list', (req, res) => {
   const data = getPublishedData();
   const list = data.folders.map(f => ({
     id: f.id,
     title: f.title,
     visibility: f.visibility,
+    allowedUsers: f.allowedUsers || [],
+    allowedGroups: f.allowedGroups || [],
     notesCount: data.notes.filter(n => n.parent_id === f.id).length,
     updated_at: f.updated_at
   }));
   res.json({ folders: list });
 });
 
-// RECEIVE PUBLISH, UPDATE VISIBILITY OR REMOVE FROM PLUGIN
+// PUBBLICAZIONE TACCUINO CON SUPPORTO PER UTENTI E GRUPPI
 app.post('/api/publish', (req, res) => {
   const { folder, notes, updateOnlyVisibility } = req.body;
 
-  if (!folder || !folder.id) {
-    return res.status(400).json({ error: 'Dati incompleti' });
-  }
+  if (!folder || !folder.id) return res.status(400).json({ error: 'Dati incompleti' });
 
   const currentData = getPublishedData();
 
@@ -73,7 +88,11 @@ app.post('/api/publish', (req, res) => {
     currentData.notes = currentData.notes.filter(n => n.parent_id !== folder.id);
   } else if (updateOnlyVisibility) {
     const target = currentData.folders.find(f => f.id === folder.id);
-    if (target) target.visibility = folder.visibility;
+    if (target) {
+      target.visibility = folder.visibility;
+      target.allowedUsers = folder.allowedUsers || [];
+      target.allowedGroups = folder.allowedGroups || [];
+    }
   } else {
     currentData.folders = currentData.folders.filter(f => f.id !== folder.id);
     currentData.notes = currentData.notes.filter(n => n.parent_id !== folder.id);
@@ -82,6 +101,8 @@ app.post('/api/publish', (req, res) => {
       id: folder.id,
       title: folder.title,
       visibility: folder.visibility || 'private',
+      allowedUsers: folder.allowedUsers || [],
+      allowedGroups: folder.allowedGroups || [],
       updated_at: Date.now()
     });
 
@@ -99,30 +120,38 @@ app.post('/api/publish', (req, res) => {
   }
 
   savePublishedData(currentData);
-  res.json({ success: true, message: 'Operazione completata' });
+  res.json({ success: true });
 });
 
 // LOGIN API
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   try {
-    const result = await pool.query('SELECT id, password FROM users WHERE email = $1', [email]);
+    const result = await pool.query('SELECT id, email, is_admin, password FROM users WHERE email = $1', [email]);
     if (result.rows.length === 0) return res.status(401).json({ error: 'Email non trovata' });
     
     const user = result.rows[0];
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) return res.status(401).json({ error: 'Password errata' });
 
-    res.json({ success: true, userId: user.id });
+    res.json({ success: true, userId: user.id, email: user.email, isAdmin: !!user.is_admin });
   } catch (err) {
     res.status(500).json({ error: 'Errore interno del server' });
   }
 });
 
-// UNIFIED DATA FETCHING
+// UNIFIED DATA FETCHING CON SICUREZZA PER UTENTI/GRUPPI
 app.get('/api/data', async (req, res) => {
   const userId = req.query.userId;
   const isAuth = !!userId;
+
+  let currentUserEmail = '';
+  if (isAuth) {
+    try {
+      const uRes = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+      if (uRes.rows.length > 0) currentUserEmail = uRes.rows[0].email;
+    } catch (e) {}
+  }
 
   let allFolders = [];
   let allNotes = [];
@@ -132,6 +161,7 @@ app.get('/api/data', async (req, res) => {
   const folderIdsSet = new Set();
   const noteIdsSet = new Set();
 
+  // 1. CARICAMENTO DATI LIVE DA POSTGRESQL (SE LOGGATO)
   if (isAuth) {
     try {
       const queryText = `
@@ -140,12 +170,7 @@ app.get('/api/data', async (req, res) => {
         LEFT JOIN user_items ui ON (ui.item_id = i.id OR ui.item_id = i.jop_id)
         LEFT JOIN shares s ON (s.item_id = i.id OR s.item_id = i.jop_id OR s.folder_id = i.jop_id)
         LEFT JOIN share_users su ON su.share_id = s.id
-        WHERE (
-          i.owner_id = $1 
-          OR ui.user_id = $1 
-          OR su.user_id = $1
-          OR i.jop_type IN (5, 6)
-        )
+        WHERE (i.owner_id = $1 OR ui.user_id = $1 OR su.user_id = $1 OR i.jop_type IN (5, 6))
         AND i.jop_type IN (1, 2, 5, 6)
       `;
 
@@ -156,40 +181,22 @@ app.get('/api/data', async (req, res) => {
         let parsedContent = {};
         try { parsedContent = JSON.parse(row.content.toString('utf-8')); } catch (e) { return; }
 
-        if (Number(parsedContent.deleted_time || 0) > 0 || 
-            Number(parsedContent.user_deleted_time || 0) > 0 || 
-            Number(parsedContent.is_conflict || 0) > 0 || 
-            parsedContent.in_trash || parsedContent.is_trash) return;
+        if (Number(parsedContent.deleted_time || 0) > 0 || Number(parsedContent.is_conflict || 0) > 0) return;
 
         const effectiveParentId = row.jop_parent_id || parsedContent.parent_id || '';
 
         if (row.jop_type === 2) {
           let extractedIcon = '';
           if (parsedContent.icon) {
-              try { extractedIcon = JSON.parse(parsedContent.icon).emoji || ''; } catch (e) { extractedIcon = parsedContent.icon; }
+            try { extractedIcon = JSON.parse(parsedContent.icon).emoji || ''; } catch (e) { extractedIcon = parsedContent.icon; }
           }
-          foldersRaw.push({ 
-            id: row.jop_id, 
-            parent_id: effectiveParentId, 
-            icon: extractedIcon || '📁', 
-            title: parsedContent.title || 'Senza Titolo',
-            isPublished: false
-          });
-        } 
-        else if (row.jop_type === 1) {
-          allNotes.push({ 
-            id: row.jop_id, 
-            parent_id: effectiveParentId, 
-            title: parsedContent.title || 'Nuova Nota', 
-            body: parsedContent.body || '', 
-            updated_time: Number(parsedContent.user_updated_time || parsedContent.updated_time || 0) 
-          });
+          foldersRaw.push({ id: row.jop_id, parent_id: effectiveParentId, icon: extractedIcon || '📁', title: parsedContent.title || 'Senza Titolo', isPublished: false });
+        } else if (row.jop_type === 1) {
+          allNotes.push({ id: row.jop_id, parent_id: effectiveParentId, title: parsedContent.title || 'Nuova Nota', body: parsedContent.body || '', updated_time: Number(parsedContent.user_updated_time || parsedContent.updated_time || 0) });
           noteIdsSet.add(row.jop_id);
-        }
-        else if (row.jop_type === 5) {
+        } else if (row.jop_type === 5) {
           tags.push({ id: row.jop_id, title: parsedContent.title || 'Tag' });
-        }
-        else if (row.jop_type === 6) {
+        } else if (row.jop_type === 6) {
           noteTags.push({ note_id: parsedContent.note_id, tag_id: parsedContent.tag_id });
         }
       });
@@ -202,10 +209,7 @@ app.get('/api/data', async (req, res) => {
           if (!folderMap.has(current.parent_id)) { isOrphan = true; break; }
           current = folderMap.get(current.parent_id);
         }
-        if (!isOrphan) {
-          allFolders.push(f);
-          folderIdsSet.add(f.id);
-        }
+        if (!isOrphan) { allFolders.push(f); folderIdsSet.add(f.id); }
       });
 
       allNotes.forEach(note => {
@@ -213,13 +217,31 @@ app.get('/api/data', async (req, res) => {
         note.tags = tags.filter(t => myTagIds.includes(t.id)).map(t => t.title);
       });
 
-    } catch (err) {
-      console.error("Errore lettura DB Live:", err);
-    }
+    } catch (err) { console.error("Errore DB Live:", err); }
   }
 
+  // 2. UNIONE DATI PUBBLICATI CON FILTRO PER UTENTI E GRUPPI
   const publishedData = getPublishedData();
-  const visiblePublishedFolders = publishedData.folders.filter(f => isAuth || f.visibility === 'public');
+  const groupsData = getGroupsData();
+
+  // Trova a quali gruppi appartiene l'utente corrente
+  const userGroupIds = groupsData
+    .filter(g => g.members && g.members.includes(currentUserEmail))
+    .map(g => g.id);
+
+  const visiblePublishedFolders = publishedData.folders.filter(f => {
+    if (f.visibility === 'public') return true;
+    if (!isAuth) return false;
+    if (f.visibility === 'private') return true; // Visibile a tutti i registrati
+    if (f.visibility === 'custom') {
+      const allowedUsers = f.allowedUsers || [];
+      const allowedGroups = f.allowedGroups || [];
+      const isUserAllowed = allowedUsers.includes(currentUserEmail);
+      const isGroupAllowed = allowedGroups.some(gId => userGroupIds.includes(gId));
+      return isUserAllowed || isGroupAllowed;
+    }
+    return false;
+  });
 
   visiblePublishedFolders.forEach(f => {
     if (folderIdsSet.has(f.id)) {
@@ -230,13 +252,7 @@ app.get('/api/data', async (req, res) => {
       }
     } else {
       const iconTag = f.visibility === 'public' ? '🌍' : '🔒';
-      allFolders.push({
-        id: f.id,
-        parent_id: '',
-        icon: iconTag,
-        title: `${f.title} (Pubblicato)`,
-        isPublished: true
-      });
+      allFolders.push({ id: f.id, parent_id: '', icon: iconTag, title: `${f.title} (Pubblicato)`, isPublished: true });
       folderIdsSet.add(f.id);
     }
   });
@@ -246,30 +262,12 @@ app.get('/api/data', async (req, res) => {
 
   visiblePublishedNotes.forEach(n => {
     if (!noteIdsSet.has(n.id)) {
-      allNotes.push({
-        id: n.id,
-        parent_id: n.parent_id,
-        title: n.title,
-        body: n.body,
-        updated_time: n.updated_time,
-        tags: ['Pubblicato']
-      });
+      allNotes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.updated_time, tags: ['Pubblicato'] });
       noteIdsSet.add(n.id);
     }
   });
 
   res.json({ folders: allFolders, notes: allNotes, isAuth });
-});
-
-app.get('/api/debug', (req, res) => {
-  const data = getPublishedData();
-  res.json({
-    dataDir: DATA_DIR,
-    filePath: PUBLISHED_DATA_FILE,
-    fileExists: fs.existsSync(PUBLISHED_DATA_FILE),
-    foldersCount: data.folders ? data.folders.length : 0,
-    notesCount: data.notes ? data.notes.length : 0
-  });
 });
 
 app.get('/api/resource/:id', async (req, res) => {
@@ -281,15 +279,15 @@ app.get('/api/resource/:id', async (req, res) => {
     let binaryContent = null;
 
     for (let row of result.rows) {
-        if (!row.content) continue;
-        const contentString = row.content.toString('utf-8');
-        if (contentString.trim().startsWith('{')) {
-            try {
-                const meta = JSON.parse(contentString);
-                if (meta.mime) mimeType = meta.mime;
-                if (meta.title) fileName = meta.title;
-            } catch(e) {}
-        } else { binaryContent = row.content; }
+      if (!row.content) continue;
+      const contentString = row.content.toString('utf-8');
+      if (contentString.trim().startsWith('{')) {
+        try {
+          const meta = JSON.parse(contentString);
+          if (meta.mime) mimeType = meta.mime;
+          if (meta.title) fileName = meta.title;
+        } catch(e) {}
+      } else { binaryContent = row.content; }
     }
 
     if (binaryContent) {
@@ -300,6 +298,4 @@ app.get('/api/resource/:id', async (req, res) => {
   } catch (err) { res.status(500).send('Errore server'); }
 });
 
-app.listen(port, () => {
-  console.log(`🚀 Joplin Web Viewer su http://localhost:${port}`);
-});
+app.listen(port, () => console.log(`🚀 Joplin Web Viewer su http://localhost:${port}`));
