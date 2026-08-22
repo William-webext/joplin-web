@@ -57,13 +57,19 @@ app.post('/api/login', async (req, res) => {
 });
 // L'API principale: chiede le note di un utente specifico
 // L'API principale: chiede le note, i taccuini e i TAG
+// L'API principale: chiede le note, i taccuini e i TAG (inclusi quelli condivisi)
 app.get('/api/data/:owner_id', async (req, res) => {
   const ownerId = req.params.owner_id;
   
   try {
-    // 1, 2, 5, 6 sono rispettivamente: Note, Taccuini, Tag, Associazione Nota-Tag
+    // Selezioniamo gli elementi di proprietà dell'utente (owner_id) 
+    // e quelli condivisi con lui (presenti nella tabella user_items)
     const result = await pool.query(
-      'SELECT jop_id, jop_parent_id, jop_type, content FROM items WHERE owner_id = $1 AND jop_type IN (1, 2, 5, 6)',
+      `SELECT DISTINCT i.jop_id, i.jop_parent_id, i.jop_type, i.content 
+       FROM items i
+       LEFT JOIN user_items ui ON (ui.item_id = i.id OR ui.item_id = i.jop_id)
+       WHERE (i.owner_id = $1 OR ui.user_id = $1)
+         AND i.jop_type IN (1, 2, 5, 6)`,
       [ownerId]
     );
 
@@ -91,17 +97,14 @@ app.get('/api/data/:owner_id', async (req, res) => {
       else if (row.jop_type === 1) {
         notes.push({ id: row.jop_id, parent_id: row.jop_parent_id, title: parsedContent.title || 'Nuova Nota', body: parsedContent.body || '', updated_time: Number(parsedContent.user_updated_time || parsedContent.updated_time || 0) });
       }
-      // Salviamo i Tag
       else if (row.jop_type === 5) {
         tags.push({ id: row.jop_id, title: parsedContent.title || 'Tag' });
       }
-      // Salviamo le Associazioni (Quale nota ha quale tag)
       else if (row.jop_type === 6) {
         noteTags.push({ note_id: parsedContent.note_id, tag_id: parsedContent.tag_id });
       }
     });
 
-    // Uniamo i Tag alle rispettive Note prima di inviarli al browser
     notes.forEach(note => {
       const myTagIds = noteTags.filter(nt => nt.note_id === note.id).map(nt => nt.tag_id);
       note.tags = tags.filter(t => myTagIds.includes(t.id)).map(t => t.title);
