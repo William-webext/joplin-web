@@ -45,9 +45,22 @@ app.use((req, res, next) => {
   next();
 });
 
-// RECEIVE PUBLISH OR REMOVE FROM PLUGIN
+// LISTA DEI TACCUINI PUBBLICATI PER IL PANNELLO DEL PLUGIN
+app.get('/api/published-list', (req, res) => {
+  const data = getPublishedData();
+  const list = data.folders.map(f => ({
+    id: f.id,
+    title: f.title,
+    visibility: f.visibility,
+    notesCount: data.notes.filter(n => n.parent_id === f.id).length,
+    updated_at: f.updated_at
+  }));
+  res.json({ folders: list });
+});
+
+// RECEIVE PUBLISH, UPDATE VISIBILITY OR REMOVE FROM PLUGIN
 app.post('/api/publish', (req, res) => {
-  const { folder, notes } = req.body;
+  const { folder, notes, updateOnlyVisibility } = req.body;
 
   if (!folder || !folder.id) {
     return res.status(400).json({ error: 'Dati incompleti' });
@@ -55,12 +68,16 @@ app.post('/api/publish', (req, res) => {
 
   const currentData = getPublishedData();
 
-  // Rimuove sempre la versione precedente del taccuino e delle note
-  currentData.folders = currentData.folders.filter(f => f.id !== folder.id);
-  currentData.notes = currentData.notes.filter(n => n.parent_id !== folder.id);
+  if (folder.visibility === 'remove') {
+    currentData.folders = currentData.folders.filter(f => f.id !== folder.id);
+    currentData.notes = currentData.notes.filter(n => n.parent_id !== folder.id);
+  } else if (updateOnlyVisibility) {
+    const target = currentData.folders.find(f => f.id === folder.id);
+    if (target) target.visibility = folder.visibility;
+  } else {
+    currentData.folders = currentData.folders.filter(f => f.id !== folder.id);
+    currentData.notes = currentData.notes.filter(n => n.parent_id !== folder.id);
 
-  // Se l'azione NON è una rimozione, aggiunge i nuovi dati pubblicati
-  if (folder.visibility !== 'remove') {
     currentData.folders.push({
       id: folder.id,
       title: folder.title,
@@ -82,7 +99,7 @@ app.post('/api/publish', (req, res) => {
   }
 
   savePublishedData(currentData);
-  res.json({ success: true, message: folder.visibility === 'remove' ? 'Pubblicazione rimossa' : 'Pubblicato correttamente' });
+  res.json({ success: true, message: 'Operazione completata' });
 });
 
 // LOGIN API
