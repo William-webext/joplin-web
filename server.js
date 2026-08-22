@@ -9,7 +9,6 @@ app.use(express.static('public'));
 app.use(express.json({ limit: '50mb' })); 
 const port = 3000;
 
-// Gestione cartella dati persistente
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -46,38 +45,44 @@ app.use((req, res, next) => {
   next();
 });
 
-// RECEIVE PUBLISH FROM PLUGIN
+// RECEIVE PUBLISH OR REMOVE FROM PLUGIN
 app.post('/api/publish', (req, res) => {
   const { folder, notes } = req.body;
 
-  if (!folder || !folder.id || !notes) {
+  if (!folder || !folder.id) {
     return res.status(400).json({ error: 'Dati incompleti' });
   }
 
   const currentData = getPublishedData();
 
+  // Rimuove sempre la versione precedente del taccuino e delle note
   currentData.folders = currentData.folders.filter(f => f.id !== folder.id);
   currentData.notes = currentData.notes.filter(n => n.parent_id !== folder.id);
 
-  currentData.folders.push({
-    id: folder.id,
-    title: folder.title,
-    visibility: folder.visibility || 'private',
-    updated_at: Date.now()
-  });
-
-  notes.forEach(note => {
-    currentData.notes.push({
-      id: note.id,
-      parent_id: folder.id,
-      title: note.title,
-      body: note.body,
-      updated_time: note.user_updated_time || note.updated_time || Date.now()
+  // Se l'azione NON è una rimozione, aggiunge i nuovi dati pubblicati
+  if (folder.visibility !== 'remove') {
+    currentData.folders.push({
+      id: folder.id,
+      title: folder.title,
+      visibility: folder.visibility || 'private',
+      updated_at: Date.now()
     });
-  });
+
+    if (notes && Array.isArray(notes)) {
+      notes.forEach(note => {
+        currentData.notes.push({
+          id: note.id,
+          parent_id: folder.id,
+          title: note.title,
+          body: note.body,
+          updated_time: note.user_updated_time || note.updated_time || Date.now()
+        });
+      });
+    }
+  }
 
   savePublishedData(currentData);
-  res.json({ success: true, message: 'Taccuino pubblicato correttamente' });
+  res.json({ success: true, message: folder.visibility === 'remove' ? 'Pubblicazione rimossa' : 'Pubblicato correttamente' });
 });
 
 // LOGIN API
@@ -97,7 +102,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// UNIFIED DATA FETCHING WITH AUTOMATIC DEDUPLICATION
+// UNIFIED DATA FETCHING
 app.get('/api/data', async (req, res) => {
   const userId = req.query.userId;
   const isAuth = !!userId;
@@ -110,7 +115,6 @@ app.get('/api/data', async (req, res) => {
   const folderIdsSet = new Set();
   const noteIdsSet = new Set();
 
-  // 1. CARICAMENTO DATI LIVE DA POSTGRESQL (SE AUTENTICATO)
   if (isAuth) {
     try {
       const queryText = `
@@ -173,7 +177,6 @@ app.get('/api/data', async (req, res) => {
         }
       });
 
-      // Filtro taccuini orfani PostgreSQL
       const folderMap = new Map(foldersRaw.map(f => [f.id, f]));
       foldersRaw.forEach(f => {
         let current = f;
@@ -198,20 +201,17 @@ app.get('/api/data', async (req, res) => {
     }
   }
 
-  // 2. UNIONE DATI PUBBLICATI (EVITANDO DUPLICATI)
   const publishedData = getPublishedData();
   const visiblePublishedFolders = publishedData.folders.filter(f => isAuth || f.visibility === 'public');
 
   visiblePublishedFolders.forEach(f => {
     if (folderIdsSet.has(f.id)) {
-      // Se il taccuino esiste già nel DB live, aggiorniamo l'icona sul taccuino esistente
       const existingFolder = allFolders.find(folder => folder.id === f.id);
       if (existingFolder) {
         existingFolder.isPublished = true;
         existingFolder.icon = f.visibility === 'public' ? '🌍' : '🔒';
       }
     } else {
-      // Se il taccuino è stato pubblicato ed è di un altro utente (o non è nel DB live)
       const iconTag = f.visibility === 'public' ? '🌍' : '🔒';
       allFolders.push({
         id: f.id,
@@ -244,7 +244,6 @@ app.get('/api/data', async (req, res) => {
   res.json({ folders: allFolders, notes: allNotes, isAuth });
 });
 
-// DEBUG ENDPOINT
 app.get('/api/debug', (req, res) => {
   const data = getPublishedData();
   res.json({
@@ -256,7 +255,6 @@ app.get('/api/debug', (req, res) => {
   });
 });
 
-// RESOURCE DOWNLOAD API
 app.get('/api/resource/:id', async (req, res) => {
   const resourceId = req.params.id;
   try {
