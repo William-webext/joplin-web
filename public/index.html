@@ -34,7 +34,7 @@
         .list-container { overflow-y: auto; flex-grow: 1; }
         
         .folder-item { cursor: pointer; font-size: 13px; color: #ccc; }
-        .folder-title { padding: 8px 15px; display: flex; align-items: center; }
+        .folder-title { padding: 6px 15px; display: flex; align-items: center; }
         .folder-title:hover { background-color: var(--hover-bg); }
         .folder-title.active { background-color: var(--accent-blue); color: white; }
         .children-container { border-left: 1px solid #444; margin-left: 20px; }
@@ -50,7 +50,6 @@
         .note-item.active { background-color: var(--accent-blue); color: white; }
         
         .search-bar { margin: 10px; padding: 6px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); border-radius: 4px; color: white; font-size: 13px; }
-        .sort-dropdown { margin: 0 10px 10px 10px; padding: 5px; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); color: var(--text-muted); border-radius: 4px; font-size: 12px; outline: none; cursor: pointer; }
 
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 2000; }
         .modal-card { background: var(--bg-sidebar); padding: 25px; border-radius: 8px; width: 450px; border: 1px solid var(--border-color); max-height: 80vh; overflow-y: auto; }
@@ -285,34 +284,58 @@
             });
         }
 
+        // RENDERING RICORSIVO COMPLETO DELL'ALBERO TACCUINI
         function renderFolderTree() {
             const container = document.getElementById('folders-container');
             container.innerHTML = '';
+
             const folderMap = {};
             allFolders.forEach(f => folderMap[f.id] = { ...f, children: [] });
             const rootFolders = [];
 
             allFolders.forEach(f => {
-                if (f.parent_id && folderMap[f.parent_id]) folderMap[f.parent_id].children.push(folderMap[f.id]);
-                else rootFolders.push(folderMap[f.id]);
+                if (f.parent_id && folderMap[f.parent_id]) {
+                    folderMap[f.parent_id].children.push(folderMap[f.id]);
+                } else {
+                    rootFolders.push(folderMap[f.id]);
+                }
             });
+
+            rootFolders.sort((a, b) => a.title.localeCompare(b.title));
 
             function createFolderHTML(folder) {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'folder-item';
+                
                 const titleDiv = document.createElement('div');
                 titleDiv.className = 'folder-title';
+                const hasChildren = folder.children && folder.children.length > 0;
+                
+                const arrow = hasChildren ? `<span class="toggle-arrow">▶</span>` : `<span class="toggle-arrow" style="visibility:hidden;">▶</span>`;
                 const icon = folder.icon ? `<span style="margin-right: 8px;">${folder.icon}</span>` : `<span style="margin-right: 8px;">📁</span>`;
-                titleDiv.innerHTML = `${icon}${folder.title}`;
+                titleDiv.innerHTML = `${arrow}${icon}${folder.title}`;
+                
+                const childrenContainer = document.createElement('div');
+                childrenContainer.className = 'children-container';
+                childrenContainer.style.display = 'none';
 
                 titleDiv.onclick = () => {
                     document.querySelectorAll('.folder-title').forEach(el => el.classList.remove('active'));
                     titleDiv.classList.add('active');
+                    if(hasChildren) {
+                        const isClosed = childrenContainer.style.display === 'none';
+                        childrenContainer.style.display = isClosed ? 'block' : 'none';
+                        titleDiv.querySelector('.toggle-arrow').classList.toggle('open', isClosed);
+                    }
                     currentFolderId = folder.id;
                     updateNoteList();
                 };
 
                 wrapper.appendChild(titleDiv);
+                if (hasChildren) {
+                    folder.children.forEach(child => childrenContainer.appendChild(createFolderHTML(child)));
+                    wrapper.appendChild(childrenContainer);
+                }
                 return wrapper;
             }
 
