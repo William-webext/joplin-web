@@ -60,9 +60,6 @@
         #editor h2, #editor h3 { color: #569cd6; border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 30px; }
         #editor a { color: #569cd6; text-decoration: none; }
 
-        /* =========================================
-           OTTIMIZZAZIONE MOBILE (SMARTPHONE)
-           ========================================= */
         .mobile-back-btn { 
             display: none; 
             background: #1a1c1f; 
@@ -81,23 +78,16 @@
 
         @media (max-width: 768px) {
             .resizer { display: none !important; }
-            
-            /* Nasconde tutto di default su Mobile */
             #sidebar, #notes-list, #editor { 
                 width: 100% !important; 
                 min-width: 100% !important; 
                 height: 100vh !important; 
                 display: none !important; 
             }
-
-            /* Logica di attivazione Pannelli */
             body.view-sidebar #sidebar { display: flex !important; }
             body.view-notes #notes-list { display: flex !important; }
             body.view-editor #editor { display: flex !important; }
-
             .mobile-back-btn { display: block; }
-            
-            /* Adattamenti grafici interni per il mobile */
             .modal-card { width: 90% !important; padding: 15px !important; }
             #editor-content { padding: 20px !important; }
             #editor h1 { font-size: 1.5em !important; }
@@ -148,9 +138,7 @@
     <div class="resizer" id="resizer-1"></div>
 
     <div id="notes-list">
-        <!-- Bottone Indietro Mobile -->
         <button class="mobile-back-btn" onclick="showPanel('sidebar')">🔙 Taccuini</button>
-        
         <div style="display: flex; flex-direction: column; border-bottom: 1px solid var(--border-color); padding-top: 10px;">
             <input type="text" id="searchInput" class="search-bar" style="margin-top: 0;" placeholder="Cerca titolo o testo..." onkeyup="updateNoteList()">
         </div>
@@ -162,9 +150,7 @@
     <div class="resizer" id="resizer-2"></div>
 
     <div id="editor">
-        <!-- Bottone Indietro Mobile -->
         <button class="mobile-back-btn" onclick="showPanel('notes')">🔙 Note</button>
-        
         <div id="editor-content">
             <div style="color: #888; text-align: center; margin-top: 20vh; font-size: 18px;">Seleziona una nota per la lettura</div>
         </div>
@@ -184,7 +170,6 @@
             fetchDataFromServer();
         };
 
-        // GESTIONE VISUALIZZAZIONE MOBILE (PANNELLI SCORREVOLI)
         function showPanel(panelName) {
             document.body.className = 'view-' + panelName;
         }
@@ -257,7 +242,6 @@
             } catch(e) {}
         }
 
-        // GESTIONE GRUPPI ADMIN
         async function openGroupsModal() {
             const res = await fetch('/api/users-and-groups');
             const data = await res.json();
@@ -338,7 +322,7 @@
             });
         }
 
-        // RENDERING RICORSIVO ALBERO TACCUINI
+        // RENDERING RICORSIVO ALBERO CON CONTEGGIO NOTE
         function renderFolderTree() {
             const container = document.getElementById('folders-container');
             container.innerHTML = '';
@@ -365,33 +349,34 @@
                 titleDiv.className = 'folder-title';
                 const hasChildren = folder.children && folder.children.length > 0;
                 
+                // Calcolo delle note contenute nel singolo taccuino
+                const noteCount = allNotes.filter(n => n.parent_id === folder.id).length;
+                const countBadge = `<span style="font-size:11px; color: var(--text-muted); margin-left: auto;">${noteCount}</span>`;
+
                 const arrow = hasChildren ? `<span class="toggle-arrow">▶</span>` : `<span class="toggle-arrow" style="visibility:hidden;">▶</span>`;
                 const icon = folder.icon ? `<span style="margin-right: 8px;">${folder.icon}</span>` : `<span style="margin-right: 8px;">📁</span>`;
-                titleDiv.innerHTML = `${arrow}${icon}${folder.title}`;
+                
+                titleDiv.innerHTML = `${arrow}${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${folder.title}</span>${countBadge}`;
                 
                 const childrenContainer = document.createElement('div');
                 childrenContainer.className = 'children-container';
                 childrenContainer.style.display = 'none';
 
-                // SU MOBILE: La freccetta espande l'albero SENZA aprire le note
                 const arrowSpan = titleDiv.querySelector('.toggle-arrow');
                 if (hasChildren && arrowSpan) {
                     arrowSpan.onclick = (e) => {
-                        e.stopPropagation(); // Evita di far scattare il click dell'intero taccuino
+                        e.stopPropagation();
                         const isClosed = childrenContainer.style.display === 'none';
                         childrenContainer.style.display = isClosed ? 'block' : 'none';
                         arrowSpan.classList.toggle('open', isClosed);
                     };
                 }
 
-                // Cliccare il nome del taccuino lo apre
                 titleDiv.onclick = () => {
                     document.querySelectorAll('.folder-title').forEach(el => el.classList.remove('active'));
                     titleDiv.classList.add('active');
                     currentFolderId = folder.id;
                     updateNoteList();
-                    
-                    // Su mobile, passa alla vista delle Note
                     if (window.innerWidth <= 768) showPanel('notes');
                 };
 
@@ -426,8 +411,6 @@
                     document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
                     div.classList.add('active');
                     renderContent(note);
-                    
-                    // Su mobile, passa alla vista della singola Nota
                     if (window.innerWidth <= 768) showPanel('editor');
                 };
                 container.appendChild(div);
