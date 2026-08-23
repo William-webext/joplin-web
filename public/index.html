@@ -1,640 +1,252 @@
-<!DOCTYPE html>
-<html lang="it">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Joplin Web Portal</title>
-    <link rel="manifest" href="/manifest.json">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <style>
-        :root {
-            --bg-sidebar: #22262b;
-            --bg-notelist: #2a2e33;
-            --bg-editor: #1e1e1e;
-            --text-main: #d4d4d4;
-            --text-muted: #8e9297;
-            --accent-blue: #0e639c;
-            --hover-bg: #353b42;
-            --border-color: #3a3f45;
+const express = require('express');
+const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+app.use(express.static('public'));
+app.use(express.json({ limit: '50mb' })); 
+const port = 3000;
+
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+const PUBLISHED_DATA_FILE = path.join(DATA_DIR, 'published_notebooks.json');
+const GROUPS_DATA_FILE = path.join(DATA_DIR, 'groups.json');
+const PREFS_DATA_FILE = path.join(DATA_DIR, 'preferences.json');
+
+if (!fs.existsSync(PUBLISHED_DATA_FILE)) fs.writeFileSync(PUBLISHED_DATA_FILE, JSON.stringify({ folders: [], notes: [] }, null, 2));
+if (!fs.existsSync(GROUPS_DATA_FILE)) fs.writeFileSync(GROUPS_DATA_FILE, JSON.stringify([], null, 2));
+// Modificato il default di highlightedNotes da Array [] a Oggetto {}
+if (!fs.existsSync(PREFS_DATA_FILE)) fs.writeFileSync(PREFS_DATA_FILE, JSON.stringify({ pinnedFolders: [], highlightedNotes: {} }, null, 2));
+
+function getPublishedData() {
+  try { return JSON.parse(fs.readFileSync(PUBLISHED_DATA_FILE, 'utf-8')); } catch (e) { return { folders: [], notes: [] }; }
+}
+function savePublishedData(data) { fs.writeFileSync(PUBLISHED_DATA_FILE, JSON.stringify(data, null, 2)); }
+
+function getGroupsData() {
+  try { return JSON.parse(fs.readFileSync(GROUPS_DATA_FILE, 'utf-8')); } catch (e) { return []; }
+}
+function saveGroupsData(groups) { fs.writeFileSync(GROUPS_DATA_FILE, JSON.stringify(groups, null, 2)); }
+
+const pool = new Pool({
+  user: process.env.DB_USER || 'joplinuser',
+  host: process.env.DB_HOST || 'db',
+  database: process.env.DB_NAME || 'joplin',
+  password: process.env.DB_PASSWORD,
+  port: parseInt(process.env.DB_PORT || '5432', 10),
+});
+
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  next();
+});
+
+async function authenticateRequest(auth) {
+  if (!auth || !auth.email || !auth.password) return false;
+  try {
+    const result = await pool.query('SELECT password FROM users WHERE email = $1', [auth.email]);
+    if (result.rows.length === 0) return false;
+    return await bcrypt.compare(auth.password, result.rows[0].password);
+  } catch (e) {
+    return false;
+  }
+}
+
+// API PREFERENZE UI
+app.get('/api/preferences', (req, res) => {
+  try { res.json(JSON.parse(fs.readFileSync(PREFS_DATA_FILE, 'utf-8'))); } 
+  catch(e) { res.json({ pinnedFolders: [], highlightedNotes: {} }); }
+});
+
+app.post('/api/preferences', (req, res) => {
+  try {
+    fs.writeFileSync(PREFS_DATA_FILE, JSON.stringify(req.body, null, 2));
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: 'Errore salvataggio preferenze' }); }
+});
+
+app.get('/api/users-and-groups', async (req, res) => {
+  try {
+    const userRes = await pool.query('SELECT id, email, is_admin FROM users ORDER BY email ASC');
+    res.json({ users: userRes.rows, groups: getGroupsData() });
+  } catch (err) { res.status(500).json({ error: 'Errore lettura utenti/gruppi' }); }
+});
+
+app.post('/api/admin/groups', async (req, res) => {
+  if (!Array.isArray(req.body.groups)) return res.status(400).json({ error: 'Dati non validi' });
+  saveGroupsData(req.body.groups);
+  res.json({ success: true });
+});
+
+app.get('/api/published-list', (req, res) => {
+  const data = getPublishedData();
+  const list = data.folders.map(f => ({
+    id: f.id, parent_id: f.parent_id || '', title: f.title, visibility: f.visibility,
+    allowedUsers: f.allowedUsers || [], allowedGroups: f.allowedGroups || [],
+    notesCount: data.notes.filter(n => n.parent_id === f.id).length, updated_at: f.updated_at
+  }));
+  res.json({ folders: list });
+});
+
+app.post('/api/publish', async (req, res) => {
+  const { auth, folder, folders, notes, updateOnlyVisibility } = req.body;
+  if (!(await authenticateRequest(auth))) return res.status(401).json({ error: 'Authentication failed.' });
+  const targetFolders = folders || (folder ? [folder] : []);
+  if (targetFolders.length === 0) return res.status(400).json({ error: 'Missing data' });
+
+  const currentData = getPublishedData();
+  const folderIds = targetFolders.map(f => f.id);
+
+  if (targetFolders[0].visibility === 'remove') {
+    currentData.folders = currentData.folders.filter(f => !folderIds.includes(f.id));
+    currentData.notes = currentData.notes.filter(n => !folderIds.includes(n.parent_id));
+  } else if (updateOnlyVisibility) {
+    targetFolders.forEach(tf => {
+      const target = currentData.folders.find(f => f.id === tf.id);
+      if (target) { target.visibility = tf.visibility; target.allowedUsers = tf.allowedUsers || []; target.allowedGroups = tf.allowedGroups || []; }
+    });
+  } else {
+    currentData.folders = currentData.folders.filter(f => !folderIds.includes(f.id));
+    currentData.notes = currentData.notes.filter(n => !folderIds.includes(n.parent_id));
+    targetFolders.forEach(tf => currentData.folders.push({ id: tf.id, parent_id: tf.parent_id || '', title: tf.title, visibility: tf.visibility || 'private', allowedUsers: tf.allowedUsers || [], allowedGroups: tf.allowedGroups || [], updated_at: Date.now() }));
+    if (Array.isArray(notes)) notes.forEach(n => currentData.notes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.user_updated_time || n.updated_time || Date.now() }));
+  }
+  savePublishedData(currentData);
+  res.json({ success: true });
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, email, is_admin, password FROM users WHERE email = $1', [req.body.email]);
+    if (result.rows.length === 0) return res.status(401).json({ error: 'Email non trovata' });
+    if (!(await bcrypt.compare(req.body.password, result.rows[0].password))) return res.status(401).json({ error: 'Password errata' });
+    res.json({ success: true, userId: result.rows[0].id, email: result.rows[0].email, isAdmin: !!result.rows[0].is_admin });
+  } catch (err) { res.status(500).json({ error: 'Errore interno' }); }
+});
+
+app.get('/api/data', async (req, res) => {
+  const userId = req.query.userId;
+  const isAuth = !!userId;
+  let currentUserEmail = '';
+
+  if (isAuth) {
+    try {
+      const uRes = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+      if (uRes.rows.length > 0) currentUserEmail = uRes.rows[0].email;
+    } catch (e) {}
+  }
+
+  let allFolders = [], allNotes = [], tags = [], noteTags = [];
+  const folderIdsSet = new Set(), noteIdsSet = new Set();
+
+  if (isAuth) {
+    try {
+      const queryText = `SELECT DISTINCT i.jop_id, i.jop_parent_id, i.jop_type, i.content FROM items i LEFT JOIN user_items ui ON (ui.item_id = i.id OR ui.item_id = i.jop_id) LEFT JOIN shares s ON (s.item_id = i.id OR s.item_id = i.jop_id OR s.folder_id = i.jop_id) LEFT JOIN share_users su ON su.share_id = s.id WHERE (i.owner_id = $1 OR ui.user_id = $1 OR su.user_id = $1 OR i.jop_type IN (5, 6)) AND i.jop_type IN (1, 2, 5, 6)`;
+      const result = await pool.query(queryText, [userId]);
+      let foldersRaw = [];
+
+      result.rows.forEach(row => {
+        let parsedContent = {};
+        try { parsedContent = JSON.parse(row.content.toString('utf-8')); } catch (e) { return; }
+        if (Number(parsedContent.deleted_time || 0) > 0 || Number(parsedContent.is_conflict || 0) > 0) return;
+
+        const effectiveParentId = row.jop_parent_id || parsedContent.parent_id || '';
+        if (row.jop_type === 2) {
+          let extractedIcon = '';
+          if (parsedContent.icon) { try { extractedIcon = JSON.parse(parsedContent.icon).emoji || ''; } catch (e) { extractedIcon = parsedContent.icon; } }
+          foldersRaw.push({ id: row.jop_id, parent_id: effectiveParentId, icon: extractedIcon || '📁', title: parsedContent.title || 'Senza Titolo', isPublished: false });
+        } else if (row.jop_type === 1) {
+          allNotes.push({ id: row.jop_id, parent_id: effectiveParentId, title: parsedContent.title || 'Nuova Nota', body: parsedContent.body || '', updated_time: Number(parsedContent.user_updated_time || parsedContent.updated_time || 0) });
+          noteIdsSet.add(row.jop_id);
+        } else if (row.jop_type === 5) { tags.push({ id: row.jop_id, title: parsedContent.title || 'Tag' });
+        } else if (row.jop_type === 6) { noteTags.push({ note_id: parsedContent.note_id, tag_id: parsedContent.tag_id }); }
+      });
+
+      const folderMap = new Map(foldersRaw.map(f => [f.id, f]));
+      foldersRaw.forEach(f => {
+        let current = f, isOrphan = false;
+        while (current.parent_id) {
+          if (!folderMap.has(current.parent_id)) { isOrphan = true; break; }
+          current = folderMap.get(current.parent_id);
         }
+        if (!isOrphan) { allFolders.push(f); folderIdsSet.add(f.id); }
+      });
 
-        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; height: 100vh; background-color: var(--bg-editor); color: var(--text-main); overflow: hidden; }
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+      allNotes.forEach(note => {
+        const myTagIds = noteTags.filter(nt => nt.note_id === note.id).map(nt => nt.tag_id);
+        note.tags = tags.filter(t => myTagIds.includes(t.id)).map(t => t.title);
+      });
+    } catch (err) {}
+  }
 
-        #sidebar { width: 260px; background-color: var(--bg-sidebar); display: flex; flex-direction: column; flex-shrink: 0; }
-        #notes-list { width: 340px; background-color: var(--bg-notelist); display: flex; flex-direction: column; flex-shrink: 0; border-left: 1px solid var(--border-color); }
-        #editor { flex-grow: 1; padding: 0; overflow-y: auto; background-color: var(--bg-editor); font-size: 15px; line-height: 1.6; min-width: 300px; display: flex; flex-direction: column; }
-        
-        .resizer { width: 4px; background-color: var(--border-color); cursor: col-resize; flex-shrink: 0; z-index: 10; transition: background-color 0.2s; }
-        .resizer:hover, .resizer.active { background-color: var(--accent-blue); }
+  const publishedData = getPublishedData();
+  const groupsData = getGroupsData();
+  const userGroupIds = groupsData.filter(g => g.members && g.members.includes(currentUserEmail)).map(g => g.id);
 
-        .header { padding: 12px 15px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
-        .list-container { overflow-y: auto; flex-grow: 1; padding-bottom: 20px;}
-        
-        .folder-item { cursor: pointer; font-size: 13px; color: #ccc; }
-        .folder-title { padding: 6px 10px; display: flex; align-items: center; position: relative; }
-        .folder-title:hover { background-color: var(--hover-bg); }
-        .folder-title.active { background-color: var(--accent-blue); color: white; }
-        .children-container { border-left: 1px solid #444; margin-left: 20px; }
-        .toggle-arrow { display: inline-block; width: 20px; padding: 5px 0; font-size: 10px; color: var(--text-muted); transition: transform 0.2s; text-align: center; }
-        .toggle-arrow.open { transform: rotate(90deg); }
+  const visiblePublishedFolders = publishedData.folders.filter(f => {
+    if (f.visibility === 'public') return true;
+    if (!isAuth) return false;
+    if (f.visibility === 'private') return true;
+    if (f.visibility === 'custom') return (f.allowedUsers || []).includes(currentUserEmail) || (f.allowedGroups || []).some(gId => userGroupIds.includes(gId));
+    return false;
+  });
 
-        .pin-btn { font-size: 12px; margin-right: 6px; opacity: 0; transition: opacity 0.2s; cursor: pointer; }
-        .folder-title:hover .pin-btn, .pin-btn.pinned { opacity: 1; filter: grayscale(0%); }
-        .pin-btn:not(.pinned) { filter: grayscale(100%) opacity(0.5); }
+  visiblePublishedFolders.forEach(f => {
+    const iconTag = f.visibility === 'public' ? '🌍' : '🔒';
+    if (folderIdsSet.has(f.id)) {
+      const existingFolder = allFolders.find(folder => folder.id === f.id);
+      if (existingFolder) { existingFolder.isPublished = true; existingFolder.icon = iconTag; }
+    } else {
+      allFolders.push({ id: f.id, parent_id: f.parent_id || '', icon: iconTag, title: f.title, isPublished: true });
+      folderIdsSet.add(f.id);
+    }
+  });
 
-        .sidebar-actions { padding: 10px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 5px; background-color: var(--bg-sidebar); }
-        .action-btn { width: 100%; padding: 8px; background: var(--bg-notelist); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; cursor: pointer; font-size: 12px; text-align: center; }
-        .action-btn:hover { background: var(--hover-bg); }
+  const visiblePublishedFolderIds = visiblePublishedFolders.map(f => f.id);
+  publishedData.notes.filter(n => visiblePublishedFolderIds.includes(n.parent_id)).forEach(n => {
+    if (!noteIdsSet.has(n.id)) {
+      allNotes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.updated_time, tags: ['Pubblicato'] });
+      noteIdsSet.add(n.id);
+    }
+  });
 
-        .note-item { padding: 12px 15px; cursor: pointer; border-bottom: 1px solid var(--border-color); font-size: 14px; position: relative; }
-        .note-item:hover { background-color: var(--hover-bg); }
-        .note-item.active { background-color: var(--accent-blue); color: white; }
-        .note-item.highlighted { background-color: #3b3a16; border-left: 4px solid #ffd700; }
-        .note-item.highlighted.active { background-color: #4b4917; }
-        
-        .search-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border-bottom: 1px solid var(--border-color); padding: 10px; background-color: #262a2f; }
-        .search-input-field { width: 100%; box-sizing: border-box; padding: 7px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); border-radius: 4px; color: white; font-size: 12px; outline: none; }
-        .search-select-field { width: 100%; box-sizing: border-box; padding: 7px 8px; background-color: #1a1c1f; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; font-size: 12px; outline: none; cursor: pointer; }
-
-        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 2000; }
-        .modal-card { background: var(--bg-sidebar); padding: 25px; border-radius: 8px; width: 450px; border: 1px solid var(--border-color); max-height: 80vh; overflow-y: auto; }
-        input.login-input { padding: 10px; margin: 8px 0; font-size: 14px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-notelist); color: white; width: 100%; box-sizing: border-box; }
-
-        #editor-content { padding: 40px; max-width: 900px; margin: 0 auto; width: 100%; box-sizing: border-box; }
-        #editor h1 { font-size: 1.8em; margin-bottom: 0.5em; color: white; }
-        #editor h2, #editor h3 { color: #569cd6; border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 30px; }
-        #editor a { color: #569cd6; text-decoration: none; }
-        #editor img { max-width: 100%; border-radius: 4px; cursor: zoom-in; }
-
-        #lightbox { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.88); z-index: 3000; justify-content: center; align-items: center; cursor: zoom-out; }
-        #lightbox img { max-width: 92%; max-height: 92%; border-radius: 6px; box-shadow: 0 0 25px rgba(0,0,0,0.8); }
-
-        #context-menu { display: none; position: absolute; background: #1a1c1f; border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.6); z-index: 10000; min-width: 180px; padding: 5px 0; }
-        .cm-item { padding: 8px 15px; cursor: pointer; font-size: 13px; color: var(--text-main); display: flex; align-items: center; gap: 10px; }
-        .cm-item:hover { background: var(--hover-bg); color: white; }
-
-        /* NUOVE REGOLE DI STAMPA OTTIMIZZATE PER PDF */
-        @media print {
-            @page { margin: 1.5cm; size: auto; }
-            body, html { display: block !important; height: auto !important; margin: 0 !important; padding: 0 !important; background: white !important; color: black !important; overflow: visible !important; }
-            #sidebar, #notes-list, .resizer, .mobile-back-btn, #lightbox, .modal-overlay, #context-menu, .header { display: none !important; }
-            
-            #editor { display: block !important; width: 100% !important; height: auto !important; overflow: visible !important; background: white !important; color: black !important; padding: 0 !important; margin: 0 !important; border: none !important; }
-            #editor-content { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
-            
-            #editor h1, #editor h2, #editor h3, #editor a, #editor p, #editor li, #editor span, #editor div { color: black !important; }
-            #editor a { text-decoration: underline; }
-            
-            /* Evita che immagini, tabelle e blocchi di codice vengano tagliati a metà */
-            #editor img, #editor table, #editor pre, #editor blockquote { page-break-inside: avoid; break-inside: avoid; }
-            #editor img { max-width: 100% !important; border: none !important; }
-            #editor pre { white-space: pre-wrap; word-wrap: break-word; border: 1px solid #ccc; padding: 10px; }
+  if (visiblePublishedFolderIds.length > 0) {
+    try {
+      const dbLiveResult = await pool.query(`SELECT jop_id, jop_parent_id, content FROM items WHERE jop_type = 1`);
+      dbLiveResult.rows.forEach(row => {
+        let parsed = {};
+        try { parsed = JSON.parse(row.content.toString('utf-8')); } catch(e) { return; }
+        if (Number(parsed.deleted_time || 0) > 0 || Number(parsed.is_conflict || 0) > 0) return;
+        const effParent = row.jop_parent_id || parsed.parent_id || '';
+        if (visiblePublishedFolderIds.includes(effParent)) {
+          const freshNote = { id: row.jop_id, parent_id: effParent, title: parsed.title || 'Nuova Nota', body: parsed.body || '', updated_time: Number(parsed.user_updated_time || parsed.updated_time || 0), tags: ['Pubblicato'] };
+          const existingIndex = allNotes.findIndex(n => n.id === row.jop_id);
+          if (existingIndex >= 0) allNotes[existingIndex] = freshNote;
+          else { allNotes.push(freshNote); noteIdsSet.add(row.jop_id); }
         }
-
-        .mobile-back-btn { display: none; background: #1a1c1f; color: #569cd6; border: none; border-bottom: 1px solid var(--border-color); padding: 15px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: left; width: 100%; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-
-        @media (max-width: 768px) {
-            .resizer { display: none !important; }
-            #sidebar, #notes-list, #editor { width: 100% !important; min-width: 100% !important; height: 100vh !important; display: none !important; }
-            body.view-sidebar #sidebar { display: flex !important; }
-            body.view-notes #notes-list { display: flex !important; }
-            body.view-editor #editor { display: flex !important; }
-            .mobile-back-btn { display: block; }
-            .modal-card { width: 90% !important; padding: 15px !important; }
-            #editor-content { padding: 20px !important; }
-            #editor h1 { font-size: 1.5em !important; }
-        }
-    </style>
-</head>
-<body class="view-sidebar">
-
-    <div id="context-menu">
-        <div class="cm-item" onclick="cmCopyLink()">🔗 Copia Link Diretto</div>
-        <div class="cm-item" onclick="cmOpenNewTab()">🌍 Apri in Nuova Scheda</div>
-        <div class="cm-item" onclick="cmHighlight()">🖍️ Evidenzia Nota</div>
-        <div class="cm-item" onclick="cmCopyMarkdown()">📋 Copia Testo (Markdown)</div>
-        <div class="cm-item" onclick="cmPrint()">🖨️ Stampa in PDF</div>
-    </div>
-
-    <div id="lightbox" onclick="closeLightbox()">
-        <img id="lightbox-img" src="">
-    </div>
-
-    <div id="login-modal" class="modal-overlay">
-        <div class="modal-card" style="width: 320px;">
-            <form onsubmit="event.preventDefault(); performLogin();">
-                <h3 style="margin-top:0; color:white;">Accedi al Portale</h3>
-                <p id="login-msg" style="font-size: 12px; color: #aaa; margin-bottom: 15px;">Inserisci le tue credenziali per procedere.</p>
-                <input type="email" id="emailInput" class="login-input" placeholder="Email" required>
-                <input type="password" id="passwordInput" class="login-input" placeholder="Password" required>
-                <button type="submit" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 10px;">Accedi</button>
-                <button type="button" class="action-btn" style="margin-top:5px;" onclick="closeLoginModal()">Annulla</button>
-            </form>
-        </div>
-    </div>
-
-    <div id="groups-modal" class="modal-overlay">
-        <div class="modal-card">
-            <h3 style="margin-top:0; color:white;">⚙️ Gestione Gruppi</h3>
-            <div id="groups-container-list"></div>
-            <hr style="border-color: var(--border-color); margin: 15px 0;">
-            <h4 style="color:white; margin-bottom: 5px;">Crea Nuovo Gruppo</h4>
-            <input type="text" id="newGroupName" class="login-input" placeholder="Nome Gruppo">
-            <button class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="createNewGroup()">+ Crea</button>
-            <button class="action-btn" style="margin-top: 15px;" onclick="closeGroupsModal()">Chiudi</button>
-        </div>
-    </div>
-
-    <div id="sidebar">
-        <div class="header">
-            <span>📓 Taccuini</span>
-            <span id="auth-status" style="font-size:10px; color:#569cd6;"></span>
-        </div>
-        <div id="folders-container" class="list-container"></div>
-        <div class="sidebar-actions">
-            <button class="action-btn" onclick="fetchDataFromServer()">🔄 Aggiorna</button>
-            <button id="admin-btn" class="action-btn" style="display:none; background:#2d3238;" onclick="openGroupsModal()">⚙️ Gruppi</button>
-            <button id="auth-btn" class="action-btn" onclick="handleAuthClick()">🔑 Accedi</button>
-        </div>
-    </div>
-    
-    <div class="resizer" id="resizer-1"></div>
-
-    <div id="notes-list">
-        <button class="mobile-back-btn" onclick="history.back()">🔙 Taccuini</button>
-        <div class="search-grid">
-            <input type="text" id="searchInput" class="search-input-field" style="grid-column: 1 / -1;" placeholder="🔍 Cerca titolo, testo o tag..." onkeyup="updateNoteList()">
-            <select id="scopeSelect" class="search-select-field" style="grid-column: 1 / -1;" onchange="updateTagDropdown(); updateNoteList();">
-                <option value="all">🌍 Cerca ovunque</option>
-                <option value="current" selected>📁 Solo taccuino selezionato</option>
-            </select>
-            <select id="sortSelect" class="search-select-field" onchange="updateNoteList()">
-                <option value="title_asc">🔤 Nome (A - Z)</option>
-                <option value="title_desc">🔤 Nome (Z - A)</option>
-                <option value="updated_desc">🕒 Più recenti</option>
-                <option value="updated_asc">🕒 Meno recenti</option>
-            </select>
-            <select id="tagSelect" class="search-select-field" onchange="updateNoteList()">
-                <option value="">🏷️ Tutti i Tag</option>
-            </select>
-        </div>
-        <div id="notes-container" class="list-container">
-            <div style="padding:15px; color:#888; font-size: 13px;">Seleziona un taccuino...</div>
-        </div>
-    </div>
-
-    <div class="resizer" id="resizer-2"></div>
-
-    <div id="editor">
-        <button class="mobile-back-btn" onclick="history.back()">🔙 Note</button>
-        <div id="editor-content">
-            <div style="color: #888; text-align: center; margin-top: 20vh; font-size: 18px;">Seleziona una nota per la lettura</div>
-        </div>
-    </div>
-
-    <script>
-        let allFolders = [];
-        let allNotes = [];
-        let systemUsers = [];
-        let systemGroups = [];
-        let pinnedFolders = [];
-        let highlightedNotes = [];
-        
-        let currentFolderId = null;
-        let currentNoteId = null;
-        let expandedFolderIds = new Set();
-        let loggedUserId = localStorage.getItem('joplin_user_id');
-        let isAdmin = localStorage.getItem('joplin_is_admin') === 'true';
-        let ctxNote = null; 
-
-        window.onload = function() {
-            if (window.innerWidth <= 768) {
-                history.replaceState({ panel: 'sidebar' }, '', window.location.search || '#sidebar');
-            }
-            initResizers();
-            updateAuthUI();
-            
-            document.addEventListener('click', () => { document.getElementById('context-menu').style.display = 'none'; });
-            fetchDataFromServer();
-        };
-
-        function initResizers() {
-            const sidebar = document.getElementById('sidebar');
-            const notesList = document.getElementById('notes-list');
-            const resizer1 = document.getElementById('resizer-1');
-            const resizer2 = document.getElementById('resizer-2');
-
-            function attachResize(resizer, targetElement, minWidth, maxWidth) {
-                if (!resizer || !targetElement) return;
-                resizer.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    let startX = e.clientX;
-                    let startWidth = targetElement.getBoundingClientRect().width;
-                    resizer.classList.add('active');
-                    document.body.style.userSelect = 'none';
-                    document.body.style.cursor = 'col-resize';
-
-                    function onMouseMove(moveEvent) {
-                        let newWidth = startWidth + (moveEvent.clientX - startX);
-                        if (newWidth >= minWidth && newWidth <= maxWidth) targetElement.style.width = newWidth + 'px';
-                    }
-
-                    function onMouseUp() {
-                        resizer.classList.remove('active');
-                        document.body.style.userSelect = ''; document.body.style.cursor = '';
-                        window.removeEventListener('mousemove', onMouseMove);
-                        window.removeEventListener('mouseup', onMouseUp);
-                    }
-                    window.addEventListener('mousemove', onMouseMove);
-                    window.addEventListener('mouseup', onMouseUp);
-                });
-            }
-            attachResize(resizer1, sidebar, 150, 500);
-            attachResize(resizer2, notesList, 200, 600);
-        }
-
-        function showPanel(panelName, pushHistory = true) {
-            document.body.className = 'view-' + panelName;
-            if (pushHistory && window.innerWidth <= 768) {
-                history.pushState({ panel: panelName }, '', window.location.search || '#' + panelName);
-            }
-        }
-
-        window.onpopstate = function(event) {
-            const lb = document.getElementById('lightbox');
-            if (lb && lb.style.display === 'flex') {
-                lb.style.display = 'none'; return;
-            }
-            if (window.innerWidth <= 768) {
-                if (event.state && event.state.panel) showPanel(event.state.panel, false);
-                else showPanel('sidebar', false);
-            }
-        };
-
-        function openLightbox(src) { document.getElementById('lightbox-img').src = src; document.getElementById('lightbox').style.display = 'flex'; if (window.innerWidth <= 768) history.pushState({ panel: document.body.className.replace('view-', ''), lightbox: true }, '', window.location.search || '#lightbox'); }
-        function closeLightbox() { const lb = document.getElementById('lightbox'); if (lb && lb.style.display === 'flex') { lb.style.display = 'none'; if (window.innerWidth <= 768 && history.state && history.state.lightbox) history.back(); } }
-
-        function updateAuthUI() {
-            const authBtn = document.getElementById('auth-btn');
-            const adminBtn = document.getElementById('admin-btn');
-            const authStatus = document.getElementById('auth-status');
-            if (loggedUserId) {
-                authBtn.innerText = '🚪 Esci'; authStatus.innerText = '🔓 Autenticato'; adminBtn.style.display = isAdmin ? 'block' : 'none';
-            } else {
-                authBtn.innerText = '🔑 Accedi'; authStatus.innerText = '🌍 Pubblico'; adminBtn.style.display = 'none';
-            }
-        }
-
-        function handleAuthClick() {
-            if (loggedUserId) {
-                localStorage.removeItem('joplin_user_id'); localStorage.removeItem('joplin_is_admin');
-                loggedUserId = null; isAdmin = false; updateAuthUI(); fetchDataFromServer();
-            } else {
-                document.getElementById('login-msg').innerText = 'Inserisci le tue credenziali per procedere.';
-                document.getElementById('login-modal').style.display = 'flex';
-            }
-        }
-        function closeLoginModal() { document.getElementById('login-modal').style.display = 'none'; }
-
-        async function performLogin() {
-            const email = document.getElementById('emailInput').value.trim();
-            const password = document.getElementById('passwordInput').value.trim();
-            try {
-                const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
-                const data = await res.json();
-                if(!res.ok) return alert('Errore: ' + data.error);
-                localStorage.setItem('joplin_user_id', data.userId); localStorage.setItem('joplin_is_admin', data.isAdmin);
-                loggedUserId = data.userId; isAdmin = data.isAdmin; closeLoginModal(); updateAuthUI(); fetchDataFromServer();
-            } catch(e) { alert('Errore connessione'); }
-        }
-
-        async function fetchPreferences() {
-            try {
-                const res = await fetch('/api/preferences');
-                const data = await res.json();
-                pinnedFolders = data.pinnedFolders || [];
-                highlightedNotes = data.highlightedNotes || [];
-            } catch(e) {}
-        }
-
-        async function savePreferences() {
-            try {
-                await fetch('/api/preferences', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pinnedFolders, highlightedNotes })
-                });
-            } catch(e) {}
-        }
-
-        async function fetchDataFromServer() {
-            const refreshBtn = document.querySelector('.sidebar-actions .action-btn');
-            const originalText = refreshBtn ? refreshBtn.innerText : '';
-            if (refreshBtn) refreshBtn.innerText = '⏳ Aggiornamento...';
-
-            try {
-                await fetchPreferences();
-
-                const baseUrl = loggedUserId ? `/api/data?userId=${loggedUserId}` : '/api/data';
-                const cacheBustingUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') + `_t=${Date.now()}`;
-                
-                const res = await fetch(cacheBustingUrl);
-                const data = await res.json();
-
-                allFolders = data.folders || [];
-                allNotes = data.notes || [];
-
-                const urlParams = new URLSearchParams(window.location.search);
-                const queryNoteId = urlParams.get('note');
-                if (queryNoteId) {
-                    const targetNote = allNotes.find(n => n.id === queryNoteId);
-                    if (targetNote) {
-                        currentNoteId = targetNote.id;
-                        currentFolderId = targetNote.parent_id;
-                        expandedFolderIds.add(currentFolderId);
-                    } else {
-                        if (!loggedUserId) {
-                            document.getElementById('login-msg').innerHTML = '<span style="color:#ff6b6b; font-weight:bold;">Questa nota è privata.</span><br>Effettua l\'accesso per visualizzarla.';
-                            document.getElementById('login-modal').style.display = 'flex';
-                        } else {
-                            alert("Nota non trovata o non possiedi i permessi per visualizzarla.");
-                        }
-                    }
-                }
-
-                renderFolderTree();
-                
-                if (currentFolderId) {
-                    updateTagDropdown();
-                    updateNoteList();
-                }
-
-                if (currentNoteId) {
-                    const openNote = allNotes.find(n => n.id === currentNoteId);
-                    if (openNote) { renderContent(openNote); showPanel('editor', true); }
-                }
-            } catch(e) {
-                console.error("Errore aggiornamento dati:", e);
-            } finally {
-                if (refreshBtn) refreshBtn.innerText = originalText;
-            }
-        }
-
-        async function openGroupsModal() { const res = await fetch('/api/users-and-groups'); const data = await res.json(); systemUsers = data.users || []; systemGroups = data.groups || []; renderGroupsList(); document.getElementById('groups-modal').style.display = 'flex'; }
-        function closeGroupsModal() { saveGroupsToServer(); document.getElementById('groups-modal').style.display = 'none'; }
-        async function saveGroupsToServer() { await fetch('/api/admin/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groups: systemGroups }) }); }
-        function createNewGroup() { const name = document.getElementById('newGroupName').value.trim(); if (!name) return alert('Inserisci un nome'); systemGroups.push({ id: 'grp_' + Date.now(), name: name, members: [] }); document.getElementById('newGroupName').value = ''; renderGroupsList(); }
-        function deleteGroup(groupId) { systemGroups = systemGroups.filter(g => g.id !== groupId); renderGroupsList(); }
-        function toggleMember(groupId, email) { const group = systemGroups.find(g => g.id === groupId); if (!group) return; if (!group.members) group.members = []; if (group.members.includes(email)) group.members = group.members.filter(m => m !== email); else group.members.push(email); }
-        function renderGroupsList() { const container = document.getElementById('groups-container-list'); container.innerHTML = ''; if (systemGroups.length === 0) { container.innerHTML = '<div style="color:#888; font-size:13px;">Nessun gruppo creato.</div>'; return; } systemGroups.forEach(g => { const card = document.createElement('div'); card.style.cssText = 'background: #2a2e33; padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid #3a3f45;'; let usersHtml = ''; systemUsers.forEach(u => { const isChecked = g.members && g.members.includes(u.email) ? 'checked' : ''; usersHtml += `<label style="display:block; font-size:12px; margin:3px 0; color:#ccc;"><input type="checkbox" ${isChecked} onchange="toggleMember('${g.id}', '${u.email}')"> ${u.email}</label>`; }); card.innerHTML = ` <div style="display:flex; justify-between; align-items:center; margin-bottom: 8px;"> <strong style="color:white; font-size: 14px;">👥 ${g.name}</strong> <button style="background:#a93226; color:white; border:none; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" onclick="deleteGroup('${g.id}')">Elimina</button> </div> <div style="max-height: 100px; overflow-y:auto; border-top:1px solid #3a3f45; padding-top:5px;"> ${usersHtml} </div>`; container.appendChild(card); }); }
-
-        function getRecursiveNoteCount(folderId) {
-            let count = allNotes.filter(n => n.parent_id === folderId).length;
-            allFolders.filter(f => f.parent_id === folderId).forEach(child => count += getRecursiveNoteCount(child.id));
-            return count;
-        }
-
-        function togglePin(e, folderId) {
-            e.stopPropagation();
-            if (pinnedFolders.includes(folderId)) {
-                pinnedFolders = pinnedFolders.filter(id => id !== folderId);
-            } else {
-                pinnedFolders.push(folderId);
-            }
-            savePreferences();
-            renderFolderTree();
-        }
-
-        function renderFolderTree() {
-            const container = document.getElementById('folders-container');
-            container.innerHTML = '';
-
-            const folderMap = {};
-            allFolders.forEach(f => folderMap[f.id] = { ...f, children: [] });
-            const rootFolders = [];
-
-            allFolders.forEach(f => {
-                if (f.parent_id && folderMap[f.parent_id]) folderMap[f.parent_id].children.push(folderMap[f.id]);
-                else rootFolders.push(folderMap[f.id]);
-            });
-
-            rootFolders.sort((a, b) => a.title.localeCompare(b.title));
-
-            function createFolderHTML(folder, forceOpen = false) {
-                const wrapper = document.createElement('div');
-                wrapper.className = 'folder-item';
-                
-                const titleDiv = document.createElement('div');
-                titleDiv.className = 'folder-title';
-                if (currentFolderId === folder.id) titleDiv.classList.add('active');
-
-                const hasChildren = folder.children && folder.children.length > 0;
-                const isExpanded = forceOpen || expandedFolderIds.has(folder.id);
-                const isPinned = pinnedFolders.includes(folder.id);
-                const noteCount = getRecursiveNoteCount(folder.id);
-
-                const countBadge = `<span style="font-size:11px; color: var(--text-muted); margin-left: auto; padding-left: 8px;">${noteCount}</span>`;
-                const pinHtml = `<span class="pin-btn ${isPinned ? 'pinned' : ''}" onclick="togglePin(event, '${folder.id}')" title="Punta/Sblocca">📌</span>`;
-                const arrow = hasChildren ? `<span class="toggle-arrow ${isExpanded ? 'open' : ''}">▶</span>` : `<span class="toggle-arrow" style="visibility:hidden;">▶</span>`;
-                const icon = folder.icon ? `<span style="margin-right: 8px;">${folder.icon}</span>` : `<span style="margin-right: 8px;">📁</span>`;
-                
-                if(forceOpen) {
-                    titleDiv.innerHTML = `${pinHtml}<span style="visibility:hidden; width:20px; display:inline-block;"></span>${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${folder.title}</span>${countBadge}`;
-                } else {
-                    titleDiv.innerHTML = `${pinHtml}${arrow}${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${folder.title}</span>${countBadge}`;
-                }
-                
-                const childrenContainer = document.createElement('div');
-                childrenContainer.className = 'children-container';
-                childrenContainer.style.display = isExpanded ? 'block' : 'none';
-
-                if (!forceOpen && hasChildren) {
-                    const arrowSpan = titleDiv.querySelector('.toggle-arrow');
-                    if (arrowSpan) {
-                        arrowSpan.onclick = (e) => {
-                            e.stopPropagation();
-                            const isClosed = childrenContainer.style.display === 'none';
-                            childrenContainer.style.display = isClosed ? 'block' : 'none';
-                            arrowSpan.classList.toggle('open', isClosed);
-                            if (isClosed) expandedFolderIds.add(folder.id); else expandedFolderIds.delete(folder.id);
-                        };
-                    }
-                }
-
-                titleDiv.onclick = () => {
-                    document.querySelectorAll('.folder-title').forEach(el => el.classList.remove('active'));
-                    titleDiv.classList.add('active');
-                    currentFolderId = folder.id;
-                    const scopeSelect = document.getElementById('scopeSelect');
-                    if (scopeSelect) scopeSelect.value = 'current';
-                    updateTagDropdown(); updateNoteList(); showPanel('notes', true);
-                };
-
-                wrapper.appendChild(titleDiv);
-                if (!forceOpen && hasChildren) {
-                    folder.children.forEach(child => childrenContainer.appendChild(createFolderHTML(child)));
-                    wrapper.appendChild(childrenContainer);
-                }
-                return wrapper;
-            }
-
-            if (pinnedFolders.length > 0) {
-                const favHeader = document.createElement('div');
-                favHeader.style.cssText = 'padding: 10px 15px 5px 15px; font-size: 11px; font-weight: bold; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;';
-                favHeader.innerText = '⭐ Preferiti';
-                container.appendChild(favHeader);
-
-                pinnedFolders.forEach(fid => {
-                    const f = allFolders.find(fold => fold.id === fid);
-                    if (f) container.appendChild(createFolderHTML(f, true));
-                });
-
-                const sep = document.createElement('div');
-                sep.style.cssText = 'height: 1px; background: var(--border-color); margin: 10px 0;';
-                container.appendChild(sep);
-            }
-
-            rootFolders.forEach(root => container.appendChild(createFolderHTML(root)));
-        }
-
-        function updateTagDropdown() {
-            const tagSelect = document.getElementById('tagSelect');
-            if (!tagSelect) return;
-            const currentVal = tagSelect.value;
-            tagSelect.innerHTML = '<option value="">🏷️ Filtra per Tag...</option>';
-            const scopeVal = document.getElementById('scopeSelect') ? document.getElementById('scopeSelect').value : 'current';
-            const folderNotes = (scopeVal === 'all') ? allNotes : allNotes.filter(n => n.parent_id === currentFolderId);
-            const uniqueTags = new Set();
-            folderNotes.forEach(n => { if (n.tags && Array.isArray(n.tags)) n.tags.forEach(t => uniqueTags.add(t)); });
-            Array.from(uniqueTags).sort().forEach(tag => {
-                const opt = document.createElement('option'); opt.value = tag; opt.textContent = '🏷️ ' + tag;
-                if (tag === currentVal) opt.selected = true; tagSelect.appendChild(opt);
-            });
-        }
-
-        function showContextMenu(x, y, note) {
-            ctxNote = note;
-            const menu = document.getElementById('context-menu');
-            menu.style.display = 'block';
-            menu.style.left = Math.min(x, window.innerWidth - 180) + 'px';
-            menu.style.top = y + 'px';
-        }
-
-        function cmCopyLink() {
-            const link = window.location.origin + window.location.pathname + '?note=' + ctxNote.id;
-            navigator.clipboard.writeText(link).then(() => alert('Link diretto copiato negli appunti!'));
-        }
-
-        function cmOpenNewTab() {
-            const link = window.location.origin + window.location.pathname + '?note=' + ctxNote.id;
-            window.open(link, '_blank');
-        }
-
-        function cmHighlight() {
-            if (highlightedNotes.includes(ctxNote.id)) {
-                highlightedNotes = highlightedNotes.filter(id => id !== ctxNote.id);
-            } else {
-                highlightedNotes.push(ctxNote.id);
-            }
-            savePreferences();
-            updateNoteList();
-        }
-
-        function cmCopyMarkdown() {
-            navigator.clipboard.writeText(ctxNote.body).then(() => alert('Testo Markdown copiato negli appunti!'));
-        }
-
-        function cmPrint() {
-            if (currentNoteId !== ctxNote.id) {
-                currentNoteId = ctxNote.id;
-                document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
-                renderContent(ctxNote);
-                updateNoteList(); 
-            }
-            setTimeout(() => window.print(), 300);
-        }
-
-        function updateNoteList() {
-            const query = document.getElementById('searchInput').value.toLowerCase().trim();
-            const scopeVal = document.getElementById('scopeSelect').value;
-            const sortVal = document.getElementById('sortSelect').value;
-            const tagVal = document.getElementById('tagSelect').value;
-            const container = document.getElementById('notes-container');
-
-            let filtered = (scopeVal === 'all') ? [...allNotes] : allNotes.filter(n => n.parent_id === currentFolderId);
-            if (tagVal) filtered = filtered.filter(n => n.tags && n.tags.includes(tagVal));
-            if (query) {
-                filtered = filtered.filter(n => {
-                    return (n.title && n.title.toLowerCase().includes(query)) || 
-                           (n.body && n.body.toLowerCase().includes(query)) || 
-                           (n.tags && n.tags.some(t => t.toLowerCase().includes(query)));
-                });
-            }
-
-            filtered.sort((a, b) => {
-                if (sortVal === 'updated_desc') return (b.updated_time || 0) - (a.updated_time || 0);
-                if (sortVal === 'updated_asc') return (a.updated_time || 0) - (b.updated_time || 0);
-                if (sortVal === 'title_asc') return a.title.localeCompare(b.title);
-                if (sortVal === 'title_desc') return b.title.localeCompare(a.title);
-                return 0;
-            });
-
-            container.innerHTML = '';
-            if (filtered.length === 0) {
-                const emptyMsg = scopeVal === 'current' && !currentFolderId ? 'Seleziona un taccuino per iniziare...' : 'Nessuna nota trovata';
-                container.innerHTML = `<div style="padding:15px; color:#888;">${emptyMsg}</div>`; 
-                return;
-            }
-
-            filtered.forEach(note => {
-                const div = document.createElement('div');
-                div.className = 'note-item';
-                if (note.id === currentNoteId) div.classList.add('active');
-                if (highlightedNotes.includes(note.id)) div.classList.add('highlighted');
-
-                let tagsBadge = '';
-                if (note.tags && note.tags.length > 0) {
-                    tagsBadge = note.tags.map(t => `<span style="font-size:10px; background:#3a3f45; color:#aaa; padding:1px 4px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
-                }
-
-                div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong>${note.title}</strong><div>${tagsBadge}</div></div>`;
-                
-                div.onclick = () => {
-                    currentNoteId = note.id;
-                    history.replaceState({ panel: 'editor' }, '', '?note=' + note.id);
-                    document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
-                    div.classList.add('active');
-                    renderContent(note);
-                    showPanel('editor', true);
-                };
-
-                div.oncontextmenu = (e) => {
-                    e.preventDefault();
-                    showContextMenu(e.pageX, e.pageY, note);
-                };
-
-                container.appendChild(div);
-            });
-        }
-
-        function renderContent(note) {
-            const editorContent = document.getElementById('editor-content');
-            let cleanBody = note.body.replace(/:\/([a-zA-Z0-9]{32})(?:\.[a-zA-Z0-9]+)?/g, '/api/resource/$1');
-            let htmlContent = marked.parse(cleanBody);
-            editorContent.innerHTML = `<h1>${note.title}</h1><div>${htmlContent}</div>`;
-
-            editorContent.querySelectorAll('img').forEach(img => {
-                img.onclick = function() { openLightbox(this.src); };
-            });
-
-            editorContent.querySelectorAll('a').forEach(a => {
-                a.setAttribute('target', '_blank');
-                a.setAttribute('rel', 'noopener noreferrer');
-            });
-        }
-    </script>
-</body>
-</html>
+      });
+    } catch (err) {}
+  }
+
+  res.json({ folders: allFolders, notes: allNotes, isAuth });
+});
+
+app.get('/api/resource/:id', async (req, res) => {
+  try {
+    const result = await pool.query("SELECT name, content FROM items WHERE jop_id = $1 OR name LIKE $2", [req.params.id, '%' + req.params.id + '%']);
+    let mimeType = 'application/octet-stream', fileName = req.params.id, binaryContent = null;
+    for (let row of result.rows) {
+      if (!row.content) continue;
+      if (row.content.toString('utf-8').trim().startsWith('{')) {
+        try { const meta = JSON.parse(row.content.toString('utf-8')); if (meta.mime) mimeType = meta.mime; if (meta.title) fileName = meta.title; } catch(e) {}
+      } else { binaryContent = row.content; }
+    }
+    if (binaryContent) { res.setHeader('Content-Type', mimeType); if (!mimeType.startsWith('image/')) res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`); res.send(binaryContent); } 
+    else { res.status(404).send('Not found'); }
+  } catch (err) { res.status(500).send('Error'); }
+});
+
+app.listen(port, () => console.log(`🚀 Joplin Web Viewer su http://localhost:${port}`));
