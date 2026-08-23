@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
+
 const app = express();
 app.use(express.static('public'));
 app.use(express.json({ limit: '15mb' })); // corpo accettato prima di qualsiasi auth check: tenerlo basso limita il rischio DoS da payload enormi
