@@ -1,18 +1,18 @@
 {
   "name": "joplin-web-viewer",
   "version": "1.0.0",
-  "description": "",
+  "description": "Joplin Web Portal Viewer",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "William Baglioni",
+  "license": "UNLICENSED",
   "type": "commonjs",
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^11.0.0",
     "express": "^5.2.1",
     "pg": "^8.23.0"
   }
