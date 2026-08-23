@@ -407,7 +407,7 @@
                 delete_btn: "Elimina",
                 no_groups: "Nessun gruppo creato.",
                 note_not_found: "Nota non trovata o non possiedi i permessi per visualizzarla.",
-                code_copy: "📋 Copia",
+                code_copy: "📋 Copy",
                 refreshing: "⏳ Aggiornamento...",
                 err_enter_group_name: "Inserisci un nome per il gruppo",
                 conn_error: "Errore di connessione"
@@ -610,17 +610,32 @@
                 sessionStorage.removeItem('joplin_user_email'); 
                 sessionStorage.removeItem('joplin_is_admin');
                 sessionStorage.removeItem('joplin_session_token');
-                loggedUserId = null; loggedUserEmail = null; isAdmin = false; sessionToken = null; 
+                
+                loggedUserId = null; 
+                loggedUserEmail = null; 
+                isAdmin = false; 
+                sessionToken = null; 
 
-                // Reset selezione e visualizzazione per tornare alla home page
+                // Reset completo dello stato e della visualizzazione
                 currentNoteId = null;
                 currentFolderId = null;
-                history.replaceState({}, '', window.location.pathname);
-                document.getElementById('editor-content').innerHTML = `<div style="color: var(--text-muted); text-align: center; margin-top: 20vh; font-size: 18px;" data-i18n="select_note_prompt">${t('select_note_prompt')}</div>`;
-                showPanel('sidebar', false);
+                allFolders = [];
+                allNotes = [];
+                highlightedNotes = {};
+                pinnedFolders = [];
+                expandedFolderIds.clear();
 
+                document.body.classList.remove('zen-mode');
+                history.replaceState({}, '', window.location.pathname);
+
+                document.getElementById('folders-container').innerHTML = '';
+                document.getElementById('notes-container').innerHTML = `<div style="padding:15px; color:var(--text-muted); font-size: 13px;" data-i18n="select_notebook_prompt">${t('select_notebook_prompt')}</div>`;
+                document.getElementById('editor-content').innerHTML = `<div style="color: var(--text-muted); text-align: center; margin-top: 20vh; font-size: 18px;" data-i18n="select_note_prompt">${t('select_note_prompt')}</div>`;
+
+                showPanel('sidebar', false);
                 updateAuthUI(); 
                 fetchDataFromServer();
+
                 if (tokenToRevoke) {
                     fetch('/api/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + tokenToRevoke } }).catch(() => {});
                 }
@@ -724,6 +739,8 @@
                 if (currentFolderId) {
                     updateTagDropdown();
                     updateNoteList();
+                } else {
+                    document.getElementById('notes-container').innerHTML = `<div style="padding:15px; color:var(--text-muted); font-size: 13px;" data-i18n="select_notebook_prompt">${t('select_notebook_prompt')}</div>`;
                 }
 
                 if (currentNoteId) {
