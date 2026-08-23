@@ -41,7 +41,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// API PER RECUPERO UTENTI E GRUPPI (Usata dal Plugin e dalla WebApp)
+// API PER RECUPERO UTENTI E GRUPPI
 app.get('/api/users-and-groups', async (req, res) => {
   try {
     const userRes = await pool.query('SELECT id, email, is_admin FROM users ORDER BY email ASC');
@@ -60,7 +60,7 @@ app.post('/api/admin/groups', async (req, res) => {
   res.json({ success: true });
 });
 
-// LISTA PUBBLICAZIONI PER IL PANNELLO PLUGIN
+// LISTA PUBBLICAZIONI
 app.get('/api/published-list', (req, res) => {
   const data = getPublishedData();
   const list = data.folders.map(f => ({
@@ -75,42 +75,51 @@ app.get('/api/published-list', (req, res) => {
   res.json({ folders: list });
 });
 
-// PUBBLICAZIONE TACCUINO CON SUPPORTO PER UTENTI E GRUPPI
+// API PUBBLICAZIONE (Supporto Ricorsivo Multi-Taccuino)
 app.post('/api/publish', (req, res) => {
-  const { folder, notes, updateOnlyVisibility } = req.body;
+  const { folder, folders, notes, updateOnlyVisibility } = req.body;
+  const targetFolders = folders || (folder ? [folder] : []);
 
-  if (!folder || !folder.id) return res.status(400).json({ error: 'Dati incompleti' });
+  if (targetFolders.length === 0) return res.status(400).json({ error: 'Dati incompleti' });
 
   const currentData = getPublishedData();
+  const folderIds = targetFolders.map(f => f.id);
 
-  if (folder.visibility === 'remove') {
-    currentData.folders = currentData.folders.filter(f => f.id !== folder.id);
-    currentData.notes = currentData.notes.filter(n => n.parent_id !== folder.id);
+  if (targetFolders[0].visibility === 'remove') {
+    currentData.folders = currentData.folders.filter(f => !folderIds.includes(f.id));
+    currentData.notes = currentData.notes.filter(n => !folderIds.includes(n.parent_id));
   } else if (updateOnlyVisibility) {
-    const target = currentData.folders.find(f => f.id === folder.id);
-    if (target) {
-      target.visibility = folder.visibility;
-      target.allowedUsers = folder.allowedUsers || [];
-      target.allowedGroups = folder.allowedGroups || [];
-    }
+    targetFolders.forEach(tf => {
+      const target = currentData.folders.find(f => f.id === tf.id);
+      if (target) {
+        target.visibility = tf.visibility;
+        target.allowedUsers = tf.allowedUsers || [];
+        target.allowedGroups = tf.allowedGroups || [];
+      }
+    });
   } else {
-    currentData.folders = currentData.folders.filter(f => f.id !== folder.id);
-    currentData.notes = currentData.notes.filter(n => n.parent_id !== folder.id);
+    // Elimina vecchie versioni dei taccuini target e delle loro note
+    currentData.folders = currentData.folders.filter(f => !folderIds.includes(f.id));
+    currentData.notes = currentData.notes.filter(n => !folderIds.includes(n.parent_id));
 
-    currentData.folders.push({
-      id: folder.id,
-      title: folder.title,
-      visibility: folder.visibility || 'private',
-      allowedUsers: folder.allowedUsers || [],
-      allowedGroups: folder.allowedGroups || [],
-      updated_at: Date.now()
+    // Aggiunge i nuovi taccuini
+    targetFolders.forEach(tf => {
+      currentData.folders.push({
+        id: tf.id,
+        title: tf.title,
+        visibility: tf.visibility || 'private',
+        allowedUsers: tf.allowedUsers || [],
+        allowedGroups: tf.allowedGroups || [],
+        updated_at: Date.now()
+      });
     });
 
+    // Aggiunge tutte le note associate
     if (notes && Array.isArray(notes)) {
       notes.forEach(note => {
         currentData.notes.push({
           id: note.id,
-          parent_id: folder.id,
+          parent_id: note.parent_id,
           title: note.title,
           body: note.body,
           updated_time: note.user_updated_time || note.updated_time || Date.now()
@@ -140,7 +149,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// UNIFIED DATA FETCHING CON SICUREZZA PER UTENTI/GRUPPI
+// FETCH UNIFICATO DATI
 app.get('/api/data', async (req, res) => {
   const userId = req.query.userId;
   const isAuth = !!userId;
@@ -161,7 +170,6 @@ app.get('/api/data', async (req, res) => {
   const folderIdsSet = new Set();
   const noteIdsSet = new Set();
 
-  // 1. CARICAMENTO DATI LIVE DA POSTGRESQL (SE LOGGATO)
   if (isAuth) {
     try {
       const queryText = `
@@ -173,18 +181,15 @@ app.get('/api/data', async (req, res) => {
         WHERE (i.owner_id = $1 OR ui.user_id = $1 OR su.user_id = $1 OR i.jop_type IN (5, 6))
         AND i.jop_type IN (1, 2, 5, 6)
       `;
-
       const result = await pool.query(queryText, [userId]);
       let foldersRaw = [];
 
       result.rows.forEach(row => {
         let parsedContent = {};
         try { parsedContent = JSON.parse(row.content.toString('utf-8')); } catch (e) { return; }
-
         if (Number(parsedContent.deleted_time || 0) > 0 || Number(parsedContent.is_conflict || 0) > 0) return;
 
         const effectiveParentId = row.jop_parent_id || parsedContent.parent_id || '';
-
         if (row.jop_type === 2) {
           let extractedIcon = '';
           if (parsedContent.icon) {
@@ -220,25 +225,19 @@ app.get('/api/data', async (req, res) => {
     } catch (err) { console.error("Errore DB Live:", err); }
   }
 
-  // 2. UNIONE DATI PUBBLICATI CON FILTRO PER UTENTI E GRUPPI
   const publishedData = getPublishedData();
   const groupsData = getGroupsData();
 
-  // Trova a quali gruppi appartiene l'utente corrente
-  const userGroupIds = groupsData
-    .filter(g => g.members && g.members.includes(currentUserEmail))
-    .map(g => g.id);
+  const userGroupIds = groupsData.filter(g => g.members && g.members.includes(currentUserEmail)).map(g => g.id);
 
   const visiblePublishedFolders = publishedData.folders.filter(f => {
     if (f.visibility === 'public') return true;
     if (!isAuth) return false;
-    if (f.visibility === 'private') return true; // Visibile a tutti i registrati
+    if (f.visibility === 'private') return true;
     if (f.visibility === 'custom') {
       const allowedUsers = f.allowedUsers || [];
       const allowedGroups = f.allowedGroups || [];
-      const isUserAllowed = allowedUsers.includes(currentUserEmail);
-      const isGroupAllowed = allowedGroups.some(gId => userGroupIds.includes(gId));
-      return isUserAllowed || isGroupAllowed;
+      return allowedUsers.includes(currentUserEmail) || allowedGroups.some(gId => userGroupIds.includes(gId));
     }
     return false;
   });
