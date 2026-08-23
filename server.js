@@ -41,7 +41,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// API PER RECUPERO UTENTI E GRUPPI
 app.get('/api/users-and-groups', async (req, res) => {
   try {
     const userRes = await pool.query('SELECT id, email, is_admin FROM users ORDER BY email ASC');
@@ -52,7 +51,6 @@ app.get('/api/users-and-groups', async (req, res) => {
   }
 });
 
-// API SALVATAGGIO GRUPPI (ADMIN)
 app.post('/api/admin/groups', async (req, res) => {
   const { groups } = req.body;
   if (!Array.isArray(groups)) return res.status(400).json({ error: 'Dati non validi' });
@@ -60,11 +58,11 @@ app.post('/api/admin/groups', async (req, res) => {
   res.json({ success: true });
 });
 
-// LISTA PUBBLICAZIONI
 app.get('/api/published-list', (req, res) => {
   const data = getPublishedData();
   const list = data.folders.map(f => ({
     id: f.id,
+    parent_id: f.parent_id || '',
     title: f.title,
     visibility: f.visibility,
     allowedUsers: f.allowedUsers || [],
@@ -75,7 +73,6 @@ app.get('/api/published-list', (req, res) => {
   res.json({ folders: list });
 });
 
-// API PUBBLICAZIONE (Supporto Ricorsivo Multi-Taccuino)
 app.post('/api/publish', (req, res) => {
   const { folder, folders, notes, updateOnlyVisibility } = req.body;
   const targetFolders = folders || (folder ? [folder] : []);
@@ -98,14 +95,13 @@ app.post('/api/publish', (req, res) => {
       }
     });
   } else {
-    // Elimina vecchie versioni dei taccuini target e delle loro note
     currentData.folders = currentData.folders.filter(f => !folderIds.includes(f.id));
     currentData.notes = currentData.notes.filter(n => !folderIds.includes(n.parent_id));
 
-    // Aggiunge i nuovi taccuini
     targetFolders.forEach(tf => {
       currentData.folders.push({
         id: tf.id,
+        parent_id: tf.parent_id || '',
         title: tf.title,
         visibility: tf.visibility || 'private',
         allowedUsers: tf.allowedUsers || [],
@@ -114,7 +110,6 @@ app.post('/api/publish', (req, res) => {
       });
     });
 
-    // Aggiunge tutte le note associate
     if (notes && Array.isArray(notes)) {
       notes.forEach(note => {
         currentData.notes.push({
@@ -132,7 +127,6 @@ app.post('/api/publish', (req, res) => {
   res.json({ success: true });
 });
 
-// LOGIN API
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -149,7 +143,6 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// FETCH UNIFICATO DATI
 app.get('/api/data', async (req, res) => {
   const userId = req.query.userId;
   const isAuth = !!userId;
@@ -251,7 +244,13 @@ app.get('/api/data', async (req, res) => {
       }
     } else {
       const iconTag = f.visibility === 'public' ? '🌍' : '🔒';
-      allFolders.push({ id: f.id, parent_id: '', icon: iconTag, title: `${f.title} (Pubblicato)`, isPublished: true });
+      allFolders.push({ 
+        id: f.id, 
+        parent_id: f.parent_id || '', 
+        icon: iconTag, 
+        title: f.title, 
+        isPublished: true 
+      });
       folderIdsSet.add(f.id);
     }
   });
