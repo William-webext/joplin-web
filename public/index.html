@@ -49,7 +49,8 @@
         .note-item:hover { background-color: var(--hover-bg); }
         .note-item.active { background-color: var(--accent-blue); color: white; }
         
-        .search-bar { margin: 10px; padding: 6px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); border-radius: 4px; color: white; font-size: 13px; }
+        .search-bar { margin: 0; padding: 6px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); border-radius: 4px; color: white; font-size: 13px; }
+        .sort-dropdown { padding: 6px; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; font-size: 12px; outline: none; cursor: pointer; }
 
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 2000; }
         .modal-card { background: var(--bg-sidebar); padding: 25px; border-radius: 8px; width: 450px; border: 1px solid var(--border-color); max-height: 80vh; overflow-y: auto; }
@@ -150,8 +151,19 @@
 
     <div id="notes-list">
         <button class="mobile-back-btn" onclick="history.back()">🔙 Taccuini</button>
-        <div style="display: flex; flex-direction: column; border-bottom: 1px solid var(--border-color); padding-top: 10px;">
-            <input type="text" id="searchInput" class="search-bar" style="margin-top: 0;" placeholder="Cerca titolo o testo..." onkeyup="updateNoteList()">
+        <div style="display: flex; flex-direction: column; border-bottom: 1px solid var(--border-color); padding: 10px; gap: 8px;">
+            <input type="text" id="searchInput" class="search-bar" placeholder="Cerca titolo o testo..." onkeyup="updateNoteList()">
+            <div style="display: flex; gap: 6px;">
+                <select id="sortSelect" class="sort-dropdown" style="flex: 1;" onchange="updateNoteList()">
+                    <option value="updated_desc">🕒 Più recenti</option>
+                    <option value="updated_asc">🕒 Meno recenti</option>
+                    <option value="title_asc">🔤 Titolo (A-Z)</option>
+                    <option value="title_desc">🔤 Titolo (Z-A)</option>
+                </select>
+                <select id="tagSelect" class="sort-dropdown" style="flex: 1;" onchange="updateNoteList()">
+                    <option value="">🏷️ Tutti i Tag</option>
+                </select>
+            </div>
         </div>
         <div id="notes-container" class="list-container">
             <div style="padding:15px; color:#888; font-size: 13px;">Seleziona un taccuino...</div>
@@ -174,6 +186,7 @@
         let systemGroups = [];
         let currentFolderId = null;
         let currentNoteId = null;
+        let expandedFolderIds = new Set();
         let loggedUserId = localStorage.getItem('joplin_user_id');
         let isAdmin = localStorage.getItem('joplin_is_admin') === 'true';
 
@@ -192,7 +205,6 @@
             }
         }
 
-        // INTERCEZIONE INDIETRO ANDROID (PER LIGHTBOX E PANNELLI)
         window.onpopstate = function(event) {
             const lb = document.getElementById('lightbox');
             if (lb && lb.style.display === 'flex') {
@@ -296,7 +308,10 @@
                 allNotes = data.notes || [];
 
                 renderFolderTree();
-                if (currentFolderId) updateNoteList();
+                if (currentFolderId) {
+                    updateTagDropdown();
+                    updateNoteList();
+                }
                 if (currentNoteId) {
                     const openNote = allNotes.find(n => n.id === currentNoteId);
                     if (openNote) renderContent(openNote);
@@ -421,19 +436,23 @@
                 
                 const titleDiv = document.createElement('div');
                 titleDiv.className = 'folder-title';
+                if (currentFolderId === folder.id) titleDiv.classList.add('active');
+
                 const hasChildren = folder.children && folder.children.length > 0;
+                const isExpanded = expandedFolderIds.has(folder.id);
                 
                 const noteCount = getRecursiveNoteCount(folder.id);
                 const countBadge = `<span style="font-size:11px; color: var(--text-muted); margin-left: auto; padding-left: 8px;">${noteCount}</span>`;
 
-                const arrow = hasChildren ? `<span class="toggle-arrow">▶</span>` : `<span class="toggle-arrow" style="visibility:hidden;">▶</span>`;
+                const arrowClass = isExpanded ? 'toggle-arrow open' : 'toggle-arrow';
+                const arrow = hasChildren ? `<span class="${arrowClass}">▶</span>` : `<span class="toggle-arrow" style="visibility:hidden;">▶</span>`;
                 const icon = folder.icon ? `<span style="margin-right: 8px;">${folder.icon}</span>` : `<span style="margin-right: 8px;">📁</span>`;
                 
                 titleDiv.innerHTML = `${arrow}${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${folder.title}</span>${countBadge}`;
                 
                 const childrenContainer = document.createElement('div');
                 childrenContainer.className = 'children-container';
-                childrenContainer.style.display = 'none';
+                childrenContainer.style.display = isExpanded ? 'block' : 'none';
 
                 const arrowSpan = titleDiv.querySelector('.toggle-arrow');
                 if (hasChildren && arrowSpan) {
@@ -442,6 +461,11 @@
                         const isClosed = childrenContainer.style.display === 'none';
                         childrenContainer.style.display = isClosed ? 'block' : 'none';
                         arrowSpan.classList.toggle('open', isClosed);
+                        if (isClosed) {
+                            expandedFolderIds.add(folder.id);
+                        } else {
+                            expandedFolderIds.delete(folder.id);
+                        }
                     };
                 }
 
@@ -449,6 +473,7 @@
                     document.querySelectorAll('.folder-title').forEach(el => el.classList.remove('active'));
                     titleDiv.classList.add('active');
                     currentFolderId = folder.id;
+                    updateTagDropdown();
                     updateNoteList();
                     showPanel('notes', true);
                 };
@@ -464,22 +489,70 @@
             rootFolders.forEach(root => container.appendChild(createFolderHTML(root)));
         }
 
+        function updateTagDropdown() {
+            const tagSelect = document.getElementById('tagSelect');
+            if (!tagSelect) return;
+            const currentVal = tagSelect.value;
+            tagSelect.innerHTML = '<option value="">🏷️ Tutti i Tag</option>';
+            
+            const folderNotes = allNotes.filter(n => n.parent_id === currentFolderId);
+            const uniqueTags = new Set();
+            folderNotes.forEach(n => {
+                if (n.tags && Array.isArray(n.tags)) {
+                    n.tags.forEach(t => uniqueTags.add(t));
+                }
+            });
+
+            Array.from(uniqueTags).sort().forEach(tag => {
+                const opt = document.createElement('option');
+                opt.value = tag;
+                opt.textContent = '🏷️ ' + tag;
+                if (tag === currentVal) opt.selected = true;
+                tagSelect.appendChild(opt);
+            });
+        }
+
         function updateNoteList() {
             const query = document.getElementById('searchInput').value.toLowerCase().trim();
+            const sortVal = document.getElementById('sortSelect').value;
+            const tagVal = document.getElementById('tagSelect').value;
             const container = document.getElementById('notes-container');
+
             let filtered = allNotes.filter(n => n.parent_id === currentFolderId);
 
-            if(query) filtered = filtered.filter(n => n.title.toLowerCase().includes(query) || n.body.toLowerCase().includes(query));
+            if (tagVal) {
+                filtered = filtered.filter(n => n.tags && n.tags.includes(tagVal));
+            }
+
+            if (query) {
+                filtered = filtered.filter(n => n.title.toLowerCase().includes(query) || n.body.toLowerCase().includes(query));
+            }
+
+            filtered.sort((a, b) => {
+                if (sortVal === 'updated_desc') return (b.updated_time || 0) - (a.updated_time || 0);
+                if (sortVal === 'updated_asc') return (a.updated_time || 0) - (b.updated_time || 0);
+                if (sortVal === 'title_asc') return a.title.localeCompare(b.title);
+                if (sortVal === 'title_desc') return b.title.localeCompare(a.title);
+                return 0;
+            });
 
             container.innerHTML = '';
             if(filtered.length === 0) {
-                container.innerHTML = '<div style="padding:15px; color:#888;">Nessuna nota trovata</div>'; return;
+                container.innerHTML = '<div style="padding:15px; color:#888;">Nessuna nota trovata</div>'; 
+                return;
             }
 
             filtered.forEach(note => {
                 const div = document.createElement('div');
                 div.className = 'note-item';
-                div.innerHTML = `<strong>${note.title}</strong>`;
+                if (note.id === currentNoteId) div.classList.add('active');
+
+                let tagsBadge = '';
+                if (note.tags && note.tags.length > 0) {
+                    tagsBadge = note.tags.map(t => `<span style="font-size:10px; background:#3a3f45; color:#aaa; padding:1px 4px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
+                }
+
+                div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong>${note.title}</strong><div>${tagsBadge}</div></div>`;
                 div.onclick = () => {
                     currentNoteId = note.id;
                     document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
