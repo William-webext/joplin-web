@@ -322,7 +322,17 @@
             });
         }
 
-        // RENDERING RICORSIVO ALBERO CON CONTEGGIO NOTE
+        // CALCOLO RICORSIVO DELLE NOTE PER UN TACCUINO E RELATIVI SOTTO-TACCUINI
+        function getRecursiveNoteCount(folderId) {
+            let count = allNotes.filter(n => n.parent_id === folderId).length;
+            const childFolders = allFolders.filter(f => f.parent_id === folderId);
+            childFolders.forEach(child => {
+                count += getRecursiveNoteCount(child.id);
+            });
+            return count;
+        }
+
+        // RENDERING RICORSIVO ALBERO CON CONTEGGIO ACCURATO
         function renderFolderTree() {
             const container = document.getElementById('folders-container');
             container.innerHTML = '';
@@ -349,9 +359,8 @@
                 titleDiv.className = 'folder-title';
                 const hasChildren = folder.children && folder.children.length > 0;
                 
-                // Calcolo delle note contenute nel singolo taccuino
-                const noteCount = allNotes.filter(n => n.parent_id === folder.id).length;
-                const countBadge = `<span style="font-size:11px; color: var(--text-muted); margin-left: auto;">${noteCount}</span>`;
+                const noteCount = getRecursiveNoteCount(folder.id);
+                const countBadge = `<span style="font-size:11px; color: var(--text-muted); margin-left: auto; padding-left: 8px;">${noteCount}</span>`;
 
                 const arrow = hasChildren ? `<span class="toggle-arrow">▶</span>` : `<span class="toggle-arrow" style="visibility:hidden;">▶</span>`;
                 const icon = folder.icon ? `<span style="margin-right: 8px;">${folder.icon}</span>` : `<span style="margin-right: 8px;">📁</span>`;
