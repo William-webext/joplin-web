@@ -3,11 +3,12 @@ const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
 const app = express();
 app.use(express.static('public'));
-app.use(express.json({ limit: '50mb' })); 
+app.use(express.json({ limit: '15mb' })); // corpo accettato prima di qualsiasi auth check: tenerlo basso limita il rischio DoS da payload enormi
 const port = 3000;
 
 // 1. INIZIALIZZAZIONE STORAGE E DATABASE SQLITE
@@ -48,7 +49,78 @@ sqliteDb.exec(`
     body TEXT,
     updated_time INTEGER
   );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    is_admin INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 `);
+
+// ==========================================
+// GESTIONE SESSIONI (sostituisce l'uso di userId nudo come credenziale)
+// ==========================================
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 ore
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+// Un token opaco random (mai l'id utente) viene dato al client dopo login riuscito.
+// Solo l'hash del token finisce nel DB: un dump del DB non permette di riusare le sessioni attive.
+function createSession(userId, email, isAdmin) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const now = Date.now();
+  const expiresAt = now + SESSION_TTL_MS;
+
+  sqliteDb.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now); // pulizia lazy delle sessioni scadute
+  sqliteDb.prepare(`
+    INSERT INTO sessions (token_hash, user_id, email, is_admin, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(hashToken(token), userId, email, isAdmin ? 1 : 0, now, expiresAt);
+
+  return { token, expiresAt };
+}
+
+function getSession(token) {
+  if (!token) return null;
+  const row = sqliteDb.prepare('SELECT user_id, email, is_admin, expires_at FROM sessions WHERE token_hash = ?').get(hashToken(token));
+  if (!row) return null;
+  if (row.expires_at < Date.now()) {
+    sqliteDb.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+    return null;
+  }
+  return { userId: row.user_id, email: row.email, isAdmin: !!row.is_admin };
+}
+
+function extractToken(req) {
+  const header = req.headers['authorization'] || '';
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : null;
+}
+
+// Route protette: richiede una sessione valida, la espone come req.auth
+function requireAuth(req, res, next) {
+  const session = getSession(extractToken(req));
+  if (!session) return res.status(401).json({ error: 'Sessione non valida o scaduta. Effettua di nuovo il login.' });
+  req.auth = session;
+  next();
+}
+
+// Route pubbliche che però cambiano comportamento se l'utente è autenticato (es. /api/data)
+function optionalAuth(req, res, next) {
+  req.auth = getSession(extractToken(req));
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.auth || !req.auth.isAdmin) return res.status(403).json({ error: 'Permessi amministratore richiesti.' });
+  next();
+}
 
 // 2. FUNZIONALITÀ DI HELPER SQLITE (Sostituiscono i vecchi file JSON)
 function getPublishedData() {
@@ -183,10 +255,11 @@ async function authenticateRequest(auth) {
 }
 
 // 4. API PREFERENZE UI (SQLITE)
-app.get('/api/preferences', (req, res) => {
-  const userId = req.query.userId;
-  if (!userId) return res.json({ pinnedFolders: [], highlightedNotes: {} });
-  
+app.get('/api/preferences', requireAuth, (req, res) => {
+  // Prima si fidava di ?userId=<qualsiasi id>: chiunque conoscesse l'id di un altro utente
+  // poteva leggere le sue preferenze senza autenticarsi. Ora l'utente viene sempre dalla sessione.
+  const userId = req.auth.userId;
+
   try { 
     const stmt = sqliteDb.prepare('SELECT pinned_folders, highlighted_notes FROM preferences WHERE user_id = ?');
     const row = stmt.get(userId);
@@ -204,9 +277,9 @@ app.get('/api/preferences', (req, res) => {
   }
 });
 
-app.post('/api/preferences', (req, res) => {
-  const { userId, pinnedFolders, highlightedNotes } = req.body;
-  if (!userId) return res.status(400).json({ error: 'Nessun utente specificato' });
+app.post('/api/preferences', requireAuth, (req, res) => {
+  const { pinnedFolders, highlightedNotes } = req.body;
+  const userId = req.auth.userId; // non più preso dal body: impediva di scrivere le preferenze di un altro utente
 
   try {
     const stmt = sqliteDb.prepare(`
@@ -229,20 +302,20 @@ app.post('/api/preferences', (req, res) => {
   }
 });
 
-app.get('/api/users-and-groups', async (req, res) => {
+app.get('/api/users-and-groups', requireAuth, async (req, res) => {
   try {
     const userRes = await pool.query('SELECT id, email, is_admin FROM users ORDER BY email ASC');
     res.json({ users: userRes.rows, groups: getGroupsData() });
   } catch (err) { res.status(500).json({ error: 'Errore lettura utenti/gruppi' }); }
 });
 
-app.post('/api/admin/groups', async (req, res) => {
+app.post('/api/admin/groups', requireAuth, requireAdmin, async (req, res) => {
   if (!Array.isArray(req.body.groups)) return res.status(400).json({ error: 'Dati non validi' });
   saveGroupsData(req.body.groups);
   res.json({ success: true });
 });
 
-app.get('/api/published-list', (req, res) => {
+app.get('/api/published-list', requireAuth, (req, res) => {
   const data = getPublishedData();
   const list = data.folders.map(f => ({
     id: f.id, parent_id: f.parent_id || '', title: f.title, visibility: f.visibility,
@@ -282,23 +355,34 @@ app.post('/api/publish', async (req, res) => {
 app.post('/api/login', async (req, res) => {
   try {
     const result = await pool.query('SELECT id, email, is_admin, password FROM users WHERE email = $1', [req.body.email]);
-    if (result.rows.length === 0) return res.status(401).json({ error: 'Email non trovata' });
-    if (!(await bcrypt.compare(req.body.password, result.rows[0].password))) return res.status(401).json({ error: 'Password errata' });
-    res.json({ success: true, userId: result.rows[0].id, email: result.rows[0].email, isAdmin: !!result.rows[0].is_admin });
+    // Stesso messaggio generico per email inesistente e password errata: evita di rivelare quali email sono registrate (user enumeration)
+    if (result.rows.length === 0) return res.status(401).json({ error: 'Credenziali non valide' });
+    if (!(await bcrypt.compare(req.body.password, result.rows[0].password))) return res.status(401).json({ error: 'Credenziali non valide' });
+
+    const { token, expiresAt } = createSession(result.rows[0].id, result.rows[0].email, !!result.rows[0].is_admin);
+    res.json({
+      success: true,
+      token,
+      expiresAt,
+      userId: result.rows[0].id,
+      email: result.rows[0].email,
+      isAdmin: !!result.rows[0].is_admin
+    });
   } catch (err) { res.status(500).json({ error: 'Errore interno' }); }
 });
 
-app.get('/api/data', async (req, res) => {
-  const userId = req.query.userId;
-  const isAuth = !!userId;
-  let currentUserEmail = '';
+app.post('/api/logout', requireAuth, (req, res) => {
+  sqliteDb.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(extractToken(req)));
+  res.json({ success: true });
+});
 
-  if (isAuth) {
-    try {
-      const uRes = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
-      if (uRes.rows.length > 0) currentUserEmail = uRes.rows[0].email;
-    } catch (e) {}
-  }
+app.get('/api/data', optionalAuth, async (req, res) => {
+  // Prima: isAuth = !!req.query.userId, quindi chiunque poteva impersonare qualsiasi utente
+  // passando il suo id nella query string, senza aver mai fatto login. Ora isAuth dipende
+  // esclusivamente da una sessione verificata lato server.
+  const isAuth = !!req.auth;
+  const userId = isAuth ? req.auth.userId : null;
+  const currentUserEmail = isAuth ? req.auth.email : '';
 
   let allFolders = [], allNotes = [], tags = [], noteTags = [];
   const folderIdsSet = new Set(), noteIdsSet = new Set();
@@ -329,7 +413,10 @@ app.get('/api/data', async (req, res) => {
       const folderMap = new Map(foldersRaw.map(f => [f.id, f]));
       foldersRaw.forEach(f => {
         let current = f, isOrphan = false;
+        const visited = new Set(); // senza questo, un parent_id ciclico causa un loop infinito e blocca il processo
         while (current.parent_id) {
+          if (visited.has(current.id)) { isOrphan = true; break; }
+          visited.add(current.id);
           if (!folderMap.has(current.parent_id)) { isOrphan = true; break; }
           current = folderMap.get(current.parent_id);
         }
