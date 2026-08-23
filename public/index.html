@@ -53,7 +53,6 @@
         .note-item:hover { background-color: var(--hover-bg); }
         .note-item.active { background-color: var(--accent-blue); color: white; }
         
-        /* CLASSI COLORE EVIDENZIATORE */
         .note-item.hl-yellow { background-color: #3b3a16; border-left: 4px solid #ffd700; }
         .note-item.hl-yellow.active { background-color: #4b4917; }
         .note-item.hl-pink { background-color: #3b1622; border-left: 4px solid #ff7b93; }
@@ -82,20 +81,15 @@
         #lightbox { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.88); z-index: 3000; justify-content: center; align-items: center; cursor: zoom-out; }
         #lightbox img { max-width: 92%; max-height: 92%; border-radius: 6px; box-shadow: 0 0 25px rgba(0,0,0,0.8); }
 
-        /* MENU CONTESTUALE E SOTTOMENU COLORI */
         #context-menu { display: none; position: absolute; background: #1a1c1f; border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.6); z-index: 10000; min-width: 180px; padding: 5px 0; }
         .cm-item { padding: 8px 15px; cursor: pointer; font-size: 13px; color: var(--text-main); display: flex; align-items: center; justify-content: space-between; gap: 10px; position: relative; }
         .cm-item:hover { background: var(--hover-bg); color: white; }
         
         .cm-has-submenu:hover .cm-submenu { display: block; }
         .cm-submenu { display: none; position: absolute; left: 100%; top: -5px; background: #1a1c1f; border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.6); min-width: 140px; padding: 5px 0; z-index: 10001; }
-        
-        /* Correzione se il menu viene aperto troppo a destra nello schermo */
         #context-menu.menu-left .cm-submenu { left: auto; right: 100%; }
-        
         .color-circle { width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 
-        /* REGOLE DI STAMPA */
         @media print {
             @page { margin: 1.5cm; size: auto; }
             body, html { display: block !important; height: auto !important; margin: 0 !important; padding: 0 !important; background: white !important; color: black !important; overflow: visible !important; }
@@ -126,11 +120,9 @@
 </head>
 <body class="view-sidebar">
 
-    <!-- MENU CONTESTUALE -->
     <div id="context-menu">
         <div class="cm-item" onclick="cmCopyLink()"><span>🔗 Copia Link Diretto</span></div>
         <div class="cm-item" onclick="cmOpenNewTab()"><span>🌍 Apri in Nuova Scheda</span></div>
-        
         <div class="cm-item cm-has-submenu">
             <span>🖍️ Evidenzia Nota</span> <span>▶</span>
             <div class="cm-submenu">
@@ -142,7 +134,6 @@
                 <div class="cm-item" onclick="cmHighlight('none')"><span style="display:flex; align-items:center; gap:8px;">❌ Rimuovi</span></div>
             </div>
         </div>
-
         <div class="cm-item" onclick="cmCopyMarkdown()"><span>📋 Copia Testo (MD)</span></div>
         <div class="cm-item" onclick="cmPrint()"><span>🖨️ Stampa in PDF</span></div>
     </div>
@@ -229,7 +220,7 @@
         let systemUsers = [];
         let systemGroups = [];
         let pinnedFolders = [];
-        let highlightedNotes = {}; // Modificato in Oggetto
+        let highlightedNotes = {};
         
         let currentFolderId = null;
         let currentNoteId = null;
@@ -340,30 +331,44 @@
         }
 
         async function fetchPreferences() {
-            try {
-                const res = await fetch('/api/preferences');
-                const data = await res.json();
-                pinnedFolders = data.pinnedFolders || [];
-                highlightedNotes = data.highlightedNotes || {};
-                
-                // Conversione Automatica: Se il file vecchio aveva un Array, lo converto in un Oggetto
-                if (Array.isArray(highlightedNotes)) {
-                    let migratedHl = {};
-                    highlightedNotes.forEach(id => migratedHl[id] = 'yellow');
-                    highlightedNotes = migratedHl;
-                    savePreferences();
-                }
-            } catch(e) {}
+            if (loggedUserId) {
+                try {
+                    const res = await fetch(`/api/preferences?userId=${loggedUserId}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        pinnedFolders = data.pinnedFolders || [];
+                        highlightedNotes = data.highlightedNotes || {};
+                    }
+                } catch(e) {}
+            } else {
+                // Recupero preferenze solo temporanee dalla cache locale per i visitatori pubblici
+                pinnedFolders = JSON.parse(localStorage.getItem('public_pinned') || '[]');
+                highlightedNotes = JSON.parse(localStorage.getItem('public_hl') || '{}');
+            }
+
+            // Migrazione automatica se evidenziatore era un vecchio Array
+            if (Array.isArray(highlightedNotes)) {
+                let migratedHl = {};
+                highlightedNotes.forEach(id => migratedHl[id] = 'yellow');
+                highlightedNotes = migratedHl;
+                savePreferences();
+            }
         }
 
         async function savePreferences() {
-            try {
-                await fetch('/api/preferences', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pinnedFolders, highlightedNotes })
-                });
-            } catch(e) {}
+            if (loggedUserId) {
+                try {
+                    await fetch('/api/preferences', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: loggedUserId, pinnedFolders, highlightedNotes })
+                    });
+                } catch(e) {}
+            } else {
+                // Salvataggio preferenze solo temporanee nella cache locale per i visitatori pubblici
+                localStorage.setItem('public_pinned', JSON.stringify(pinnedFolders));
+                localStorage.setItem('public_hl', JSON.stringify(highlightedNotes));
+            }
         }
 
         async function fetchDataFromServer() {
@@ -551,7 +556,6 @@
             });
         }
 
-        // MOSTRA MENU E CONTROLLA POSIZIONE
         function showContextMenu(x, y, note) {
             ctxNote = note;
             const menu = document.getElementById('context-menu');
@@ -637,7 +641,6 @@
                 
                 if (note.id === currentNoteId) div.classList.add('active');
                 
-                // Applica classe colore se esiste
                 if (highlightedNotes[note.id]) {
                     div.classList.add('hl-' + highlightedNotes[note.id]);
                 }
