@@ -250,6 +250,15 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || '5432', 10),
 });
 
+// node-postgres emette "error" sui client idle del pool quando la connessione al DB si interrompe
+// (riavvio del container Postgres, blip di rete sul tunnel, ecc.). Senza un listener qui, Node
+// tratta l'evento come eccezione non gestita e termina l'intero processo — non solo la richiesta
+// in corso. Con questo listener, l'errore viene loggato e il pool prova a riconnettersi da solo
+// alla richiesta successiva, com'è normale comportamento di pg.
+pool.on('error', (err) => {
+  console.error('Errore imprevisto sul pool Postgres (connessione idle):', err.message);
+});
+
 // Con l'auth ora a token in Authorization header (non più cookie), il wildcard "*" non permette
 // più a siti terzi di leggere risposte autenticate della vittima (il token non è accessibile
 // cross-origin). Resta comunque buona norma restringere l'origine invece di lasciarla aperta a tutti:
@@ -392,7 +401,7 @@ app.get('/api/published-list', requireAuth, (req, res) => {
   res.json({ folders: list });
 });
 
-app.post('/api/publish', async (req, res) => {
+app.post('/api/publish', loginRateLimit, async (req, res) => {
   const { auth, folder, folders, notes, updateOnlyVisibility } = req.body;
   if (!(await authenticateRequest(auth))) return res.status(401).json({ error: 'Authentication failed.' });
   const targetFolders = folders || (folder ? [folder] : []);
