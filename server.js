@@ -41,7 +41,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// VERIFICA CREDENZIALI PLUGIN
 async function authenticateRequest(auth) {
   if (!auth || !auth.email || !auth.password) return false;
   try {
@@ -160,7 +159,6 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// ROBUST DATA FETCHING WITH LIVE DB OVERRIDE FOR PUBLISHED NOTES
 app.get('/api/data', async (req, res) => {
   const userId = req.query.userId;
   const isAuth = !!userId;
@@ -181,7 +179,6 @@ app.get('/api/data', async (req, res) => {
   const folderIdsSet = new Set();
   const noteIdsSet = new Set();
 
-  // 1. CARICAMENTO DATI UTENTE AUTENTICATO (DA POSTGRES)
   if (isAuth) {
     try {
       const queryText = `
@@ -237,7 +234,6 @@ app.get('/api/data', async (req, res) => {
     } catch (err) { console.error("Errore DB Live:", err); }
   }
 
-  // 2. UNIONE TACCUINI PUBBLICATI CON PERMESSI
   const publishedData = getPublishedData();
   const groupsData = getGroupsData();
 
@@ -276,9 +272,8 @@ app.get('/api/data', async (req, res) => {
   });
 
   const visiblePublishedFolderIds = visiblePublishedFolders.map(f => f.id);
-
-  // Fallback: aggiungi note dal JSON statico
   const visiblePublishedNotes = publishedData.notes.filter(n => visiblePublishedFolderIds.includes(n.parent_id));
+
   visiblePublishedNotes.forEach(n => {
     if (!noteIdsSet.has(n.id)) {
       allNotes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.updated_time, tags: ['Pubblicato'] });
@@ -286,7 +281,7 @@ app.get('/api/data', async (req, res) => {
     }
   });
 
-  // 3. RECUPERO IN TEMPO REALE DA POSTGRESQL PER I TACCUINI PUBBLICATI
+  // RECUPERO IN TEMPO REALE DA POSTGRESQL PER I TACCUINI PUBBLICATI
   if (visiblePublishedFolderIds.length > 0) {
     try {
       const dbLiveQuery = `SELECT jop_id, jop_parent_id, content FROM items WHERE jop_type = 1`;
