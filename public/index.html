@@ -6,6 +6,7 @@
     <title>Joplin Web Portal</title>
     <link rel="manifest" href="/manifest.json">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
     <style>
         :root {
             --bg-sidebar: #22262b;
@@ -433,6 +434,18 @@
             return (i18nDict[currentLang] && i18nDict[currentLang][key]) || (i18nDict['en'][key]) || key;
         }
 
+        // Sanifica testo proveniente da dati utente (titoli note/cartelle, nomi gruppi, email)
+        // prima di interpolarlo in innerHTML. Va usato ovunque un valore non fisso finisca in un template HTML.
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         function changeLanguage(lang) {
             currentLang = lang;
             localStorage.setItem('app_lang', lang);
@@ -476,7 +489,16 @@
         let loggedUserId = sessionStorage.getItem('joplin_user_id');
         let loggedUserEmail = sessionStorage.getItem('joplin_user_email');
         let isAdmin = sessionStorage.getItem('joplin_is_admin') === 'true';
+        let sessionToken = sessionStorage.getItem('joplin_session_token');
         let ctxNote = null; 
+
+        // Header da allegare alle chiamate autenticate. Se non c'è token, la richiesta parte comunque
+        // (utile per /api/data in modalità pubblica) ma il server la tratterà come anonima.
+        function authHeaders(extra) {
+            const headers = Object.assign({}, extra || {});
+            if (sessionToken) headers['Authorization'] = 'Bearer ' + sessionToken;
+            return headers;
+        }
 
         window.onload = function() {
             if (localStorage.getItem('theme') === 'light') document.body.classList.add('light-theme');
@@ -594,10 +616,16 @@
 
         function handleAuthClick() {
             if (loggedUserId) {
+                const tokenToRevoke = sessionToken;
                 sessionStorage.removeItem('joplin_user_id'); 
                 sessionStorage.removeItem('joplin_user_email'); 
                 sessionStorage.removeItem('joplin_is_admin');
-                loggedUserId = null; loggedUserEmail = null; isAdmin = false; updateAuthUI(); fetchDataFromServer();
+                sessionStorage.removeItem('joplin_session_token');
+                loggedUserId = null; loggedUserEmail = null; isAdmin = false; sessionToken = null; updateAuthUI(); fetchDataFromServer();
+                // Best-effort: invalida il token anche lato server, così se qualcuno lo intercettasse non resterebbe valido per 24h
+                if (tokenToRevoke) {
+                    fetch('/api/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + tokenToRevoke } }).catch(() => {});
+                }
             } else {
                 document.getElementById('login-msg').innerText = t('login_desc');
                 document.getElementById('login-modal').style.display = 'flex';
@@ -616,14 +644,15 @@
                 sessionStorage.setItem('joplin_user_id', data.userId); 
                 sessionStorage.setItem('joplin_user_email', email); 
                 sessionStorage.setItem('joplin_is_admin', data.isAdmin);
-                loggedUserId = data.userId; loggedUserEmail = email; isAdmin = data.isAdmin; closeLoginModal(); updateAuthUI(); fetchDataFromServer();
+                sessionStorage.setItem('joplin_session_token', data.token);
+                loggedUserId = data.userId; loggedUserEmail = email; isAdmin = data.isAdmin; sessionToken = data.token; closeLoginModal(); updateAuthUI(); fetchDataFromServer();
             } catch(e) { showToast(t('conn_error'), true); }
         }
 
         async function fetchPreferences() {
             if (loggedUserId) {
                 try {
-                    const res = await fetch(`/api/preferences?userId=${loggedUserId}`);
+                    const res = await fetch('/api/preferences', { headers: authHeaders() });
                     if (res.ok) {
                         const data = await res.json();
                         pinnedFolders = data.pinnedFolders || [];
@@ -648,8 +677,8 @@
                 try {
                     await fetch('/api/preferences', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ userId: loggedUserId, pinnedFolders, highlightedNotes })
+                        headers: authHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ pinnedFolders, highlightedNotes })
                     });
                 } catch(e) {}
             } else {
@@ -666,10 +695,11 @@
             try {
                 await fetchPreferences();
 
-                const baseUrl = loggedUserId ? `/api/data?userId=${loggedUserId}` : '/api/data';
-                const cacheBustingUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') + `_t=${Date.now()}`;
+                // Prima l'identità veniva dal parametro ?userId= (falsificabile da chiunque); ora la decide
+                // solo il token nell'header Authorization, verificato lato server.
+                const cacheBustingUrl = '/api/data' + `?_t=${Date.now()}`;
                 
-                const res = await fetch(cacheBustingUrl);
+                const res = await fetch(cacheBustingUrl, { headers: authHeaders() });
                 const data = await res.json();
 
                 allFolders = data.folders || [];
@@ -712,7 +742,7 @@
         }
 
         async function openGroupsModal() { 
-            const res = await fetch('/api/users-and-groups'); 
+            const res = await fetch('/api/users-and-groups', { headers: authHeaders() }); 
             const data = await res.json(); 
             systemUsers = data.users || []; 
             systemGroups = data.groups || []; 
@@ -756,14 +786,14 @@
         async function saveGroupsToServer() { 
             await fetch('/api/admin/groups', { 
                 method: 'POST', 
-                headers: { 'Content-Type': 'application/json' }, 
+                headers: authHeaders({ 'Content-Type': 'application/json' }), 
                 body: JSON.stringify({ groups: systemGroups }) 
             }); 
         }
 
         function deleteGroup(groupId) { systemGroups = systemGroups.filter(g => g.id !== groupId); renderGroupsList(); }
         function toggleMember(groupId, email) { const group = systemGroups.find(g => g.id === groupId); if (!group) return; if (!group.members) group.members = []; if (group.members.includes(email)) group.members = group.members.filter(m => m !== email); else group.members.push(email); }
-        function renderGroupsList() { const container = document.getElementById('groups-container-list'); container.innerHTML = ''; if (systemGroups.length === 0) { container.innerHTML = `<div style="color:var(--text-muted); font-size:13px;">${t('no_groups')}</div>`; return; } systemGroups.forEach(g => { const card = document.createElement('div'); card.style.cssText = 'background: var(--bg-editor); padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border-color);'; let usersHtml = ''; systemUsers.forEach(u => { const isChecked = g.members && g.members.includes(u.email) ? 'checked' : ''; usersHtml += `<label style="display:block; font-size:12px; margin:3px 0; color:var(--text-main);"><input type="checkbox" ${isChecked} onchange="toggleMember('${g.id}', '${u.email}')"> ${u.email}</label>`; }); card.innerHTML = ` <div style="display:flex; justify-between; align-items:center; margin-bottom: 8px;"> <strong style="color:var(--text-main); font-size: 14px;">👥 ${g.name}</strong> <button style="background:#a93226; color:white; border:none; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" onclick="deleteGroup('${g.id}')">${t('delete_btn')}</button> </div> <div style="max-height: 100px; overflow-y:auto; border-top:1px solid var(--border-color); padding-top:5px;"> ${usersHtml} </div>`; container.appendChild(card); }); }
+        function renderGroupsList() { const container = document.getElementById('groups-container-list'); container.innerHTML = ''; if (systemGroups.length === 0) { container.innerHTML = `<div style="color:var(--text-muted); font-size:13px;">${t('no_groups')}</div>`; return; } systemGroups.forEach(g => { const card = document.createElement('div'); card.style.cssText = 'background: var(--bg-editor); padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border-color);'; let usersHtml = ''; systemUsers.forEach(u => { const isChecked = g.members && g.members.includes(u.email) ? 'checked' : ''; const safeEmail = escapeHtml(u.email); usersHtml += `<label style="display:block; font-size:12px; margin:3px 0; color:var(--text-main);"><input type="checkbox" ${isChecked} onchange="toggleMember('${g.id}', '${safeEmail}')"> ${safeEmail}</label>`; }); card.innerHTML = ` <div style="display:flex; justify-between; align-items:center; margin-bottom: 8px;"> <strong style="color:var(--text-main); font-size: 14px;">👥 ${escapeHtml(g.name)}</strong> <button style="background:#a93226; color:white; border:none; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" onclick="deleteGroup('${g.id}')">${t('delete_btn')}</button> </div> <div style="max-height: 100px; overflow-y:auto; border-top:1px solid var(--border-color); padding-top:5px;"> ${usersHtml} </div>`; container.appendChild(card); }); }
 
         function getRecursiveNoteCount(folderId) {
             let count = allNotes.filter(n => n.parent_id === folderId).length;
@@ -815,10 +845,11 @@
                 const arrow = hasChildren ? `<span class="toggle-arrow ${isExpanded ? 'open' : ''}">▶</span>` : `<span class="toggle-arrow" style="visibility:hidden;">▶</span>`;
                 const icon = folder.icon ? `<span style="margin-right: 8px;">${folder.icon}</span>` : `<span style="margin-right: 8px;">📁</span>`;
                 
+                const safeFolderTitle = escapeHtml(folder.title);
                 if(forceOpen) {
-                    titleDiv.innerHTML = `${pinHtml}<span style="visibility:hidden; width:20px; display:inline-block;"></span>${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${folder.title}</span>${countBadge}`;
+                    titleDiv.innerHTML = `${pinHtml}<span style="visibility:hidden; width:20px; display:inline-block;"></span>${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeFolderTitle}</span>${countBadge}`;
                 } else {
-                    titleDiv.innerHTML = `${pinHtml}${arrow}${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${folder.title}</span>${countBadge}`;
+                    titleDiv.innerHTML = `${pinHtml}${arrow}${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeFolderTitle}</span>${countBadge}`;
                 }
                 
                 const childrenContainer = document.createElement('div');
@@ -1014,10 +1045,10 @@
 
                 let tagsBadge = '';
                 if (note.tags && note.tags.length > 0) {
-                    tagsBadge = note.tags.map(t => `<span class="tag-badge" style="font-size:10px; background:var(--badge-bg); color:inherit; padding:1px 5px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
+                    tagsBadge = note.tags.map(tg => `<span class="tag-badge" style="font-size:10px; background:var(--badge-bg); color:inherit; padding:1px 5px; border-radius:3px; margin-left:4px;">${escapeHtml(tg)}</span>`).join('');
                 }
 
-                const displayTitle = getNoteDisplayTitle(note, highlightedNotes);
+                const displayTitle = escapeHtml(getNoteDisplayTitle(note, highlightedNotes));
 
                 div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${displayTitle}</strong><div>${tagsBadge}</div></div>`;
                 
@@ -1055,9 +1086,12 @@
             const editorContent = document.getElementById('editor-content');
             
             let cleanBody = note.body.replace(/:\/([a-zA-Z0-9]{32})(?:\.([a-zA-Z0-9]+))?/g, '/api/resource/$1');
-            let htmlContent = marked.parse(cleanBody);
-            
-            const displayTitle = getNoteDisplayTitle(note, highlightedNotes);
+            let rawHtml = marked.parse(cleanBody);
+            // Il body della nota può contenere HTML/script arbitrario (markdown permette HTML passthrough):
+            // senza sanitizzazione qui una nota pubblicata diventa un vettore di stored XSS per chi la visualizza.
+            let htmlContent = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target'] });
+
+            const displayTitle = escapeHtml(getNoteDisplayTitle(note, highlightedNotes));
 
             editorContent.innerHTML = `<h1>${displayTitle}</h1><div id="md-rendered-body">${htmlContent}</div>`;
 
