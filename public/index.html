@@ -17,18 +17,20 @@
             --hover-bg: #353b42;
             --border-color: #3a3f45;
             --code-bg: #2d3139;
+            --badge-bg: rgba(255, 255, 255, 0.1);
         }
 
         body.light-theme {
             --bg-sidebar: #f0f2f5;
-            --bg-notelist: #e4e7eb;
+            --bg-notelist: #ffffff;
             --bg-editor: #ffffff;
             --text-main: #1f2328;
             --text-muted: #636c76;
             --accent-blue: #0969da;
-            --hover-bg: #d0d7de;
+            --hover-bg: #eaeef2;
             --border-color: #d0d7de;
             --code-bg: #f6f8fa;
+            --badge-bg: rgba(0, 0, 0, 0.08);
         }
 
         body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; height: 100vh; background-color: var(--bg-editor); color: var(--text-main); overflow: hidden; transition: background-color 0.2s, color 0.2s; }
@@ -62,15 +64,25 @@
         .action-btn { width: 100%; padding: 8px; background: var(--bg-notelist); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; cursor: pointer; font-size: 12px; text-align: center; }
         .action-btn:hover { background: var(--hover-bg); }
 
-        .note-item { padding: 12px 15px; cursor: pointer; border-bottom: 1px solid var(--border-color); font-size: 14px; position: relative; }
+        .note-item { padding: 12px 15px; cursor: pointer; border-bottom: 1px solid var(--border-color); font-size: 14px; position: relative; color: var(--text-main); }
         .note-item:hover { background-color: var(--hover-bg); }
-        .note-item.active { background-color: var(--accent-blue); color: white; }
-        
-        .note-item.hl-yellow { background-color: #3b3a16; border-left: 4px solid #ffd700; }
-        .note-item.hl-pink { background-color: #3b1622; border-left: 4px solid #ff7b93; }
-        .note-item.hl-green { background-color: #163b22; border-left: 4px solid #50c878; }
-        .note-item.hl-blue { background-color: #162a3b; border-left: 4px solid #4da6ff; }
-        .note-item.hl-orange { background-color: #3b2816; border-left: 4px solid #ff9f00; }
+        .note-item.active { background-color: var(--accent-blue) !important; color: white !important; }
+        .note-item.active strong { color: white !important; }
+
+        /* EVIDENZIATORI - DARK MODE */
+        .note-item.hl-yellow { background-color: #3a3818; color: #ffffff; border-left: 4px solid #ffd700; }
+        .note-item.hl-pink { background-color: #3a1c28; color: #ffffff; border-left: 4px solid #ff7b93; }
+        .note-item.hl-green { background-color: #1c3a24; color: #ffffff; border-left: 4px solid #50c878; }
+        .note-item.hl-blue { background-color: #1c2b3a; color: #ffffff; border-left: 4px solid #4da6ff; }
+        .note-item.hl-orange { background-color: #3a2a1c; color: #ffffff; border-left: 4px solid #ff9f00; }
+
+        /* EVIDENZIATORI - LIGHT MODE (PASTELLO E TESTO LEGGIBILE) */
+        body.light-theme .note-item.hl-yellow { background-color: #fef9c3 !important; color: #1f2328 !important; border-left: 4px solid #ca8a04 !important; }
+        body.light-theme .note-item.hl-pink { background-color: #ffe4e6 !important; color: #1f2328 !important; border-left: 4px solid #e11d48 !important; }
+        body.light-theme .note-item.hl-green { background-color: #dcfce7 !important; color: #1f2328 !important; border-left: 4px solid #16a34a !important; }
+        body.light-theme .note-item.hl-blue { background-color: #e0f2fe !important; color: #1f2328 !important; border-left: 4px solid #0284c7 !important; }
+        body.light-theme .note-item.hl-orange { background-color: #ffedd5 !important; color: #1f2328 !important; border-left: 4px solid #ea580c !important; }
+        body.light-theme .note-item strong { color: inherit; }
         
         .search-grid { display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--border-color); padding: 10px; background-color: var(--bg-sidebar); }
         .search-row { display: flex; gap: 6px; }
@@ -269,7 +281,6 @@
     </div>
 
     <script>
-        // DIZIONARIO INTERNAZIONALIZZAZIONE (i18n)
         const i18nDict = {
             en: {
                 notebooks_title: "📓 Notebooks",
@@ -455,6 +466,7 @@
         function toggleTheme() {
             document.body.classList.toggle('light-theme');
             localStorage.setItem('theme', document.body.classList.contains('light-theme') ? 'light' : 'dark');
+            updateNoteList();
         }
 
         function toggleZenMode() {
@@ -909,10 +921,10 @@
 
                 let tagsBadge = '';
                 if (note.tags && note.tags.length > 0) {
-                    tagsBadge = note.tags.map(t => `<span style="font-size:10px; background:var(--bg-sidebar); color:var(--text-muted); padding:1px 4px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
+                    tagsBadge = note.tags.map(t => `<span style="font-size:10px; background:var(--badge-bg); color:inherit; padding:1px 5px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
                 }
 
-                div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong>${note.title}</strong><div>${tagsBadge}</div></div>`;
+                div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${note.title}</strong><div>${tagsBadge}</div></div>`;
                 
                 div.onclick = () => {
                     currentNoteId = note.id;
