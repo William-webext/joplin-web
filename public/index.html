@@ -202,7 +202,7 @@
     <div id="sidebar">
         <div class="header">
             <span data-i18n="notebooks_title">📓 Notebooks</span>
-            <span id="auth-status" style="font-size:10px; color:var(--accent-blue);"></span>
+            <span id="auth-status" style="font-size:10px; color:var(--accent-blue); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title=""></span>
         </div>
         <div id="folders-container" class="list-container"></div>
         <div class="sidebar-actions">
@@ -285,7 +285,6 @@
         };
         const ALL_EMOJIS = ['🟡 ', '🔴 ', '🟢 ', '🔵 ', '🟠 ', '🟡', '🔴', '🟢', '🔵', '🟠'];
 
-        // Estrae il titolo pulito privo di emoji per ordinamento e ricerche
         function getCleanTitle(title) {
             let clean = title || '';
             ALL_EMOJIS.forEach(e => {
@@ -295,7 +294,6 @@
             return clean.trim();
         }
 
-        // Restituisce il titolo con l'emoji all'INIZIO per la visualizzazione
         function getNoteDisplayTitle(note, highlightedNotesMap) {
             let cleanTitle = getCleanTitle(note.title);
             const activeColor = highlightedNotesMap ? highlightedNotesMap[note.id] : null;
@@ -357,7 +355,9 @@
                 no_groups: "No groups created.",
                 note_not_found: "Note not found or permission denied.",
                 code_copy: "📋 Copy",
-                refreshing: "⏳ Refreshing..."
+                refreshing: "⏳ Refreshing...",
+                err_enter_group_name: "Please enter a group name",
+                conn_error: "Connection Error"
             },
             it: {
                 notebooks_title: "📓 Taccuini",
@@ -412,7 +412,9 @@
                 no_groups: "Nessun gruppo creato.",
                 note_not_found: "Nota non trovata o non possiedi i permessi per visualizzarla.",
                 code_copy: "📋 Copia",
-                refreshing: "⏳ Aggiornamento..."
+                refreshing: "⏳ Aggiornamento...",
+                err_enter_group_name: "Inserisci un nome per il gruppo",
+                conn_error: "Errore di connessione"
             }
         };
 
@@ -468,6 +470,7 @@
         let expandedFolderIds = new Set();
         
         let loggedUserId = sessionStorage.getItem('joplin_user_id');
+        let loggedUserEmail = sessionStorage.getItem('joplin_user_email');
         let isAdmin = sessionStorage.getItem('joplin_is_admin') === 'true';
         let ctxNote = null; 
 
@@ -495,9 +498,10 @@
             document.body.classList.toggle('zen-mode');
         }
 
-        function showToast(message) {
+        function showToast(message, isError = false) {
             const toast = document.getElementById('toast');
-            toast.innerHTML = '<span>✅</span> ' + message;
+            const icon = isError ? '⚠️' : '✅';
+            toast.innerHTML = '<span>' + icon + '</span> ' + message;
             toast.classList.add('show');
             setTimeout(() => { toast.classList.remove('show'); }, 3000);
         }
@@ -572,19 +576,24 @@
             const authStatus = document.getElementById('auth-status');
             if (loggedUserId) {
                 authBtn.innerText = t('logout_btn'); 
-                authStatus.innerText = t('auth_authenticated'); 
+                const labelText = loggedUserEmail ? `🔓 ${loggedUserEmail}` : t('auth_authenticated');
+                authStatus.innerText = labelText;
+                authStatus.title = loggedUserEmail || '';
                 adminBtn.style.display = isAdmin ? 'block' : 'none';
             } else {
                 authBtn.innerText = t('login_btn'); 
                 authStatus.innerText = t('auth_public'); 
+                authStatus.title = '';
                 adminBtn.style.display = 'none';
             }
         }
 
         function handleAuthClick() {
             if (loggedUserId) {
-                sessionStorage.removeItem('joplin_user_id'); sessionStorage.removeItem('joplin_is_admin');
-                loggedUserId = null; isAdmin = false; updateAuthUI(); fetchDataFromServer();
+                sessionStorage.removeItem('joplin_user_id'); 
+                sessionStorage.removeItem('joplin_user_email'); 
+                sessionStorage.removeItem('joplin_is_admin');
+                loggedUserId = null; loggedUserEmail = null; isAdmin = false; updateAuthUI(); fetchDataFromServer();
             } else {
                 document.getElementById('login-msg').innerText = t('login_desc');
                 document.getElementById('login-modal').style.display = 'flex';
@@ -598,11 +607,13 @@
             try {
                 const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
                 const data = await res.json();
-                if(!res.ok) return alert('Error: ' + data.error);
+                if(!res.ok) return showToast(data.error || 'Login Error', true);
                 
-                sessionStorage.setItem('joplin_user_id', data.userId); sessionStorage.setItem('joplin_is_admin', data.isAdmin);
-                loggedUserId = data.userId; isAdmin = data.isAdmin; closeLoginModal(); updateAuthUI(); fetchDataFromServer();
-            } catch(e) { alert('Connection Error'); }
+                sessionStorage.setItem('joplin_user_id', data.userId); 
+                sessionStorage.setItem('joplin_user_email', email); 
+                sessionStorage.setItem('joplin_is_admin', data.isAdmin);
+                loggedUserId = data.userId; loggedUserEmail = email; isAdmin = data.isAdmin; closeLoginModal(); updateAuthUI(); fetchDataFromServer();
+            } catch(e) { showToast(t('conn_error'), true); }
         }
 
         async function fetchPreferences() {
@@ -673,7 +684,7 @@
                             document.getElementById('login-msg').innerHTML = t('login_private_msg');
                             document.getElementById('login-modal').style.display = 'flex';
                         } else {
-                            alert(t('note_not_found'));
+                            showToast(t('note_not_found'), true);
                         }
                     }
                 }
@@ -699,7 +710,19 @@
         async function openGroupsModal() { const res = await fetch('/api/users-and-groups'); const data = await res.json(); systemUsers = data.users || []; systemGroups = data.groups || []; renderGroupsList(); document.getElementById('groups-modal').style.display = 'flex'; }
         function closeGroupsModal() { saveGroupsToServer(); document.getElementById('groups-modal').style.display = 'none'; }
         async function saveGroupsToServer() { await fetch('/api/admin/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groups: systemGroups }) }); }
-        function createNewGroup() { const name = document.getElementById('newGroupName').value.trim(); if (!name) return alert('Enter a name'); systemGroups.push({ id: 'grp_' + Date.now(), name: name, members: [] }); document.getElementById('newGroupName').value = ''; renderGroupsList(); }
+        
+        function createNewGroup() { 
+            const nameInput = document.getElementById('newGroupName');
+            const name = nameInput.value.trim(); 
+            if (!name) {
+                showToast(t('err_enter_group_name'), true);
+                return;
+            } 
+            systemGroups.push({ id: 'grp_' + Date.now(), name: name, members: [] }); 
+            nameInput.value = ''; 
+            renderGroupsList(); 
+        }
+
         function deleteGroup(groupId) { systemGroups = systemGroups.filter(g => g.id !== groupId); renderGroupsList(); }
         function toggleMember(groupId, email) { const group = systemGroups.find(g => g.id === groupId); if (!group) return; if (!group.members) group.members = []; if (group.members.includes(email)) group.members = group.members.filter(m => m !== email); else group.members.push(email); }
         function renderGroupsList() { const container = document.getElementById('groups-container-list'); container.innerHTML = ''; if (systemGroups.length === 0) { container.innerHTML = `<div style="color:var(--text-muted); font-size:13px;">${t('no_groups')}</div>`; return; } systemGroups.forEach(g => { const card = document.createElement('div'); card.style.cssText = 'background: var(--bg-editor); padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border-color);'; let usersHtml = ''; systemUsers.forEach(u => { const isChecked = g.members && g.members.includes(u.email) ? 'checked' : ''; usersHtml += `<label style="display:block; font-size:12px; margin:3px 0; color:var(--text-main);"><input type="checkbox" ${isChecked} onchange="toggleMember('${g.id}', '${u.email}')"> ${u.email}</label>`; }); card.innerHTML = ` <div style="display:flex; justify-between; align-items:center; margin-bottom: 8px;"> <strong style="color:var(--text-main); font-size: 14px;">👥 ${g.name}</strong> <button style="background:#a93226; color:white; border:none; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" onclick="deleteGroup('${g.id}')">${t('delete_btn')}</button> </div> <div style="max-height: 100px; overflow-y:auto; border-top:1px solid var(--border-color); padding-top:5px;"> ${usersHtml} </div>`; container.appendChild(card); }); }
@@ -844,7 +867,7 @@
             const link = window.location.origin + window.location.pathname + '?note=' + ctxNote.id;
             navigator.clipboard.writeText(link)
                 .then(() => showToast(t('toast_link_copied')))
-                .catch(() => showToast(t('toast_copy_error')));
+                .catch(() => showToast(t('toast_copy_error'), true));
             document.getElementById('context-menu').style.display = 'none';
         }
 
@@ -871,7 +894,7 @@
         function cmCopyMarkdown() {
             navigator.clipboard.writeText(ctxNote.body)
                 .then(() => showToast(t('toast_md_copied')))
-                .catch(() => showToast(t('toast_copy_error')));
+                .catch(() => showToast(t('toast_copy_error'), true));
             document.getElementById('context-menu').style.display = 'none';
         }
 
