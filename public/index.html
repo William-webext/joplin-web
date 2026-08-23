@@ -291,8 +291,11 @@
             return clean.trim();
         }
 
+        // Titolo mostrato all'utente: nessuna pulizia, le emoji eventuali restano visibili.
+        // getCleanTitle (sopra) resta usata a parte solo per il confronto nell'ordinamento alfabetico,
+        // così un titolo che inizia con un'emoji non finisce fuori posto nell'ordine A-Z.
         function getNoteDisplayTitle(note) {
-            return getCleanTitle(note.title);
+            return (note.title || '').trim();
         }
 
         const i18nDict = {
@@ -1020,10 +1023,8 @@
 
             if (query) {
                 filtered = filtered.filter(n => {
-                    const displayTitle = getNoteDisplayTitle(n);
                     const cleanTitle = getCleanTitle(n.title);
-                    return (displayTitle && displayTitle.toLowerCase().includes(query)) || 
-                           (cleanTitle && cleanTitle.toLowerCase().includes(query)) ||
+                    return (cleanTitle && cleanTitle.toLowerCase().includes(query)) ||
                            (n.body && n.body.toLowerCase().includes(query)) || 
                            (n.tags && n.tags.some(t => t.toLowerCase().includes(query)));
                 });
