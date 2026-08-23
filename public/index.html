@@ -185,7 +185,6 @@
             fetchDataFromServer();
         };
 
-        // GESTIONE CRONOLOGIA BROWSER / TASTO INDIETRO ANDROID
         function showPanel(panelName, pushHistory = true) {
             document.body.className = 'view-' + panelName;
             if (pushHistory && window.innerWidth <= 768) {
@@ -193,7 +192,13 @@
             }
         }
 
+        // INTERCEZIONE INDIETRO ANDROID (PER LIGHTBOX E PANNELLI)
         window.onpopstate = function(event) {
+            const lb = document.getElementById('lightbox');
+            if (lb && lb.style.display === 'flex') {
+                lb.style.display = 'none';
+                return;
+            }
             if (window.innerWidth <= 768) {
                 if (event.state && event.state.panel) {
                     showPanel(event.state.panel, false);
@@ -203,8 +208,22 @@
             }
         };
 
+        function openLightbox(src) {
+            document.getElementById('lightbox-img').src = src;
+            document.getElementById('lightbox').style.display = 'flex';
+            if (window.innerWidth <= 768) {
+                history.pushState({ panel: document.body.className.replace('view-', ''), lightbox: true }, '', '#lightbox');
+            }
+        }
+
         function closeLightbox() {
-            document.getElementById('lightbox').style.display = 'none';
+            const lb = document.getElementById('lightbox');
+            if (lb && lb.style.display === 'flex') {
+                lb.style.display = 'none';
+                if (window.innerWidth <= 768 && history.state && history.state.lightbox) {
+                    history.back();
+                }
+            }
         }
 
         function updateAuthUI() {
@@ -261,7 +280,6 @@
             } catch(e) { alert('Errore connessione'); }
         }
 
-        // CARICAMENTO DATI CON ANTI-CACHE
         async function fetchDataFromServer() {
             const refreshBtn = document.querySelector('.sidebar-actions .action-btn');
             const originalText = refreshBtn ? refreshBtn.innerText : '';
@@ -479,12 +497,10 @@
             let htmlContent = marked.parse(cleanBody);
             editorContent.innerHTML = `<h1>${note.title}</h1><div>${htmlContent}</div>`;
 
-            // INGRANDIMENTO IMMAGINI (LIGHTBOX)
             const images = editorContent.querySelectorAll('img');
             images.forEach(img => {
                 img.onclick = function() {
-                    document.getElementById('lightbox-img').src = this.src;
-                    document.getElementById('lightbox').style.display = 'flex';
+                    openLightbox(this.src);
                 };
             });
         }
