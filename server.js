@@ -6,8 +6,14 @@ const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
-
 const app = express();
+// Dietro un reverse proxy/tunnel (es. Cloudflare Tunnel), senza questo Express vede sempre
+// l'IP del proxy invece di quello del client reale, e il rate limit sul login finirebbe
+// per contare tutti gli utenti come se fossero uno solo. TRUST_PROXY=1 attiva la lettura
+// di X-Forwarded-For; lascialo disattivato solo se esponi il container direttamente senza proxy.
+if (process.env.TRUST_PROXY === '1') {
+  app.set('trust proxy', 1);
+}
 app.use(express.static('public'));
 app.use(express.json({ limit: '15mb' })); // corpo accettato prima di qualsiasi auth check: tenerlo basso limita il rischio DoS da payload enormi
 const port = 3000;
@@ -239,10 +245,54 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || '5432', 10),
 });
 
+// Con l'auth ora a token in Authorization header (non più cookie), il wildcard "*" non permette
+// più a siti terzi di leggere risposte autenticate della vittima (il token non è accessibile
+// cross-origin). Resta comunque buona norma restringere l'origine invece di lasciarla aperta a tutti:
+// impostare ALLOWED_ORIGIN nell'ambiente (es. https://webnote.beerfactory.pt) per attivarlo.
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || null;
+if (!ALLOWED_ORIGIN) {
+  console.warn('⚠️  ALLOWED_ORIGIN non impostata: CORS resta aperto a "*". Imposta ALLOWED_ORIGIN nel compose per restringerlo.');
+}
+
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Origin", ALLOWED_ORIGIN || "*");
+  res.header("Vary", "Origin");
   next();
 });
+
+// Limita i tentativi di login per IP: max 10 tentativi ogni 15 minuti.
+// In-memory, va bene per un'app self-hosted a singolo processo (non serve Redis per questo volume).
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 10;
+const loginAttempts = new Map(); // ip -> { count, resetAt }
+
+function loginRateLimit(req, res, next) {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+
+  if (!entry || entry.resetAt < now) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+    return next();
+  }
+
+  if (entry.count >= LOGIN_MAX_ATTEMPTS) {
+    const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
+    res.setHeader('Retry-After', String(retryAfterSec));
+    return res.status(429).json({ error: 'Troppi tentativi di login. Riprova più tardi.' });
+  }
+
+  entry.count += 1;
+  next();
+}
+
+// Pulizia periodica delle voci scadute, per non far crescere la Map all'infinito su un processo long-running
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of loginAttempts) {
+    if (entry.resetAt < now) loginAttempts.delete(ip);
+  }
+}, LOGIN_WINDOW_MS).unref();
 
 async function authenticateRequest(auth) {
   if (!auth || !auth.email || !auth.password) return false;
@@ -353,7 +403,7 @@ app.post('/api/publish', async (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', loginRateLimit, async (req, res) => {
   try {
     const result = await pool.query('SELECT id, email, is_admin, password FROM users WHERE email = $1', [req.body.email]);
     // Stesso messaggio generico per email inesistente e password errata: evita di rivelare quali email sono registrate (user enumeration)
@@ -489,9 +539,20 @@ app.get('/api/resource/:id', async (req, res) => {
     let mimeType = 'application/octet-stream', fileName = req.params.id, binaryContent = null;
     for (let row of result.rows) {
       if (!row.content) continue;
-      if (row.content.toString('utf-8').trim().startsWith('{')) {
-        try { const meta = JSON.parse(row.content.toString('utf-8')); if (meta.mime) mimeType = meta.mime; if (meta.title) fileName = meta.title; } catch(e) {}
-      } else { binaryContent = row.content; }
+      // Prima si decideva "è la riga di metadata" solo guardando se il primo carattere è "{":
+      // un file binario che inizia per caso con quel byte veniva scambiato per JSON e i suoi
+      // dati persi. Ora si prova un parse JSON completo: solo se ha successo e produce un
+      // oggetto con i campi attesi lo trattiamo come metadata, altrimenti è contenuto binario.
+      let parsedAsMetadata = false;
+      try {
+        const meta = JSON.parse(row.content.toString('utf-8'));
+        if (meta && typeof meta === 'object' && (meta.mime || meta.title)) {
+          if (meta.mime) mimeType = meta.mime;
+          if (meta.title) fileName = meta.title;
+          parsedAsMetadata = true;
+        }
+      } catch (e) { /* non è JSON valido: è la riga binaria */ }
+      if (!parsedAsMetadata) binaryContent = row.content;
     }
     if (binaryContent) { res.setHeader('Content-Type', mimeType); if (!mimeType.startsWith('image/')) res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`); res.send(binaryContent); } 
     else { res.status(404).send('Not found'); }
