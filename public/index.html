@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -91,7 +91,6 @@
         #editor a { color: var(--accent-blue); text-decoration: none; }
         #editor img { max-width: 100%; border-radius: 4px; cursor: zoom-in; }
 
-        /* FORMATTAZIONE CODE BLOCKS */
         #editor pre { background: var(--code-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; overflow-x: auto; position: relative; }
         .code-copy-btn { position: absolute; top: 6px; right: 6px; background: var(--bg-sidebar); border: 1px solid var(--border-color); color: var(--text-muted); font-size: 10px; padding: 3px 8px; border-radius: 3px; cursor: pointer; }
         .code-copy-btn:hover { color: var(--text-main); background: var(--hover-bg); }
@@ -112,7 +111,6 @@
         #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--bg-sidebar); border: 1px solid var(--border-color); color: var(--text-main); padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 500; box-shadow: 0 5px 15px rgba(0,0,0,0.5); opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0.3s; z-index: 10000; display: flex; align-items: center; gap: 10px; }
         #toast.show { opacity: 1; visibility: visible; }
 
-        /* ZEN MODE (ZEN-FULLSCREEN) */
         body.zen-mode #sidebar, body.zen-mode #notes-list, body.zen-mode .resizer { display: none !important; }
 
         @media print {
@@ -148,21 +146,21 @@
     <div id="toast"></div>
 
     <div id="context-menu">
-        <div class="cm-item" onclick="cmCopyLink()"><span>🔗 Copia Link Diretto</span></div>
-        <div class="cm-item" onclick="cmOpenNewTab()"><span>🌍 Apri in Nuova Scheda</span></div>
+        <div class="cm-item" onclick="cmCopyLink()"><span data-i18n="cm_copy_link">🔗 Copy Direct Link</span></div>
+        <div class="cm-item" onclick="cmOpenNewTab()"><span data-i18n="cm_open_tab">🌍 Open in New Tab</span></div>
         <div class="cm-item cm-has-submenu">
-            <span>🖍️ Evidenzia Nota</span> <span>▶</span>
+            <span data-i18n="cm_highlight">🖍️ Highlight Note</span> <span>▶</span>
             <div class="cm-submenu">
-                <div class="cm-item" onclick="cmHighlight('yellow')"><span style="display:flex; align-items:center; gap:8px;"><span class="color-circle" style="background:#ffd700;"></span> Giallo</span></div>
-                <div class="cm-item" onclick="cmHighlight('pink')"><span style="display:flex; align-items:center; gap:8px;"><span class="color-circle" style="background:#ff7b93;"></span> Rosa</span></div>
-                <div class="cm-item" onclick="cmHighlight('green')"><span style="display:flex; align-items:center; gap:8px;"><span class="color-circle" style="background:#50c878;"></span> Verde</span></div>
-                <div class="cm-item" onclick="cmHighlight('blue')"><span style="display:flex; align-items:center; gap:8px;"><span class="color-circle" style="background:#4da6ff;"></span> Azzurro</span></div>
-                <div class="cm-item" onclick="cmHighlight('orange')"><span style="display:flex; align-items:center; gap:8px;"><span class="color-circle" style="background:#ff9f00;"></span> Arancione</span></div>
-                <div class="cm-item" onclick="cmHighlight('none')"><span style="display:flex; align-items:center; gap:8px;">❌ Rimuovi</span></div>
+                <div class="cm-item" onclick="cmHighlight('yellow')"><span style="display:flex; align-items:center; gap:8px;"><span class="color-circle" style="background:#ffd700;"></span> <span data-i18n="color_yellow">Yellow</span></span></div>
+                <div class="cm-item" onclick="cmHighlight('pink')"><span style="display:flex; align-items:center; gap:8px;"><span class="color-circle" style="background:#ff7b93;"></span> <span data-i18n="color_pink">Pink</span></span></div>
+                <div class="cm-item" onclick="cmHighlight('green')"><span style="display:flex; align-items:center; gap:8px;"><span class="color-circle" style="background:#50c878;"></span> <span data-i18n="color_green">Green</span></span></div>
+                <div class="cm-item" onclick="cmHighlight('blue')"><span style="display:flex; align-items:center; gap:8px;"><span class="color-circle" style="background:#4da6ff;"></span> <span data-i18n="color_blue">Blue</span></span></div>
+                <div class="cm-item" onclick="cmHighlight('orange')"><span style="display:flex; align-items:center; gap:8px;"><span class="color-circle" style="background:#ff9f00;"></span> <span data-i18n="color_orange">Orange</span></span></div>
+                <div class="cm-item" onclick="cmHighlight('none')"><span style="display:flex; align-items:center; gap:8px;" data-i18n="color_remove">❌ Remove</span></div>
             </div>
         </div>
-        <div class="cm-item" onclick="cmCopyMarkdown()"><span>📋 Copia Testo (MD)</span></div>
-        <div class="cm-item" onclick="cmPrint()"><span>🖨️ Stampa in PDF</span></div>
+        <div class="cm-item" onclick="cmCopyMarkdown()"><span data-i18n="cm_copy_md">📋 Copy Text (MD)</span></div>
+        <div class="cm-item" onclick="cmPrint()"><span data-i18n="cm_print">🖨️ Print to PDF</span></div>
     </div>
 
     <div id="lightbox" onclick="closeLightbox()">
@@ -172,99 +170,259 @@
     <div id="login-modal" class="modal-overlay">
         <div class="modal-card" style="width: 320px;">
             <form onsubmit="event.preventDefault(); performLogin();">
-                <h3 style="margin-top:0; color:var(--text-main);">Accedi al Portale</h3>
-                <p id="login-msg" style="font-size: 12px; color: var(--text-muted); margin-bottom: 15px;">La sessione scadrà alla chiusura del browser.</p>
+                <h3 style="margin-top:0; color:var(--text-main);" data-i18n="login_title">Portal Login</h3>
+                <p id="login-msg" style="font-size: 12px; color: var(--text-muted); margin-bottom: 15px;" data-i18n="login_desc">Session will expire when browser is closed.</p>
                 <input type="email" id="emailInput" class="login-input" placeholder="Email" required>
                 <input type="password" id="passwordInput" class="login-input" placeholder="Password" required>
-                <button type="submit" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 10px;">Accedi</button>
-                <button type="button" class="action-btn" style="margin-top:5px;" onclick="closeLoginModal()">Annulla</button>
+                <button type="submit" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 10px;" data-i18n="login_btn">Login</button>
+                <button type="button" class="action-btn" style="margin-top:5px;" onclick="closeLoginModal()" data-i18n="cancel_btn">Cancel</button>
             </form>
         </div>
     </div>
 
     <div id="groups-modal" class="modal-overlay">
         <div class="modal-card">
-            <h3 style="margin-top:0; color:var(--text-main);">⚙️ Gestione Gruppi</h3>
+            <h3 style="margin-top:0; color:var(--text-main);" data-i18n="groups_title">⚙️ Group Management</h3>
             <div id="groups-container-list"></div>
             <hr style="border-color: var(--border-color); margin: 15px 0;">
-            <h4 style="color:var(--text-main); margin-bottom: 5px;">Crea Nuovo Gruppo</h4>
-            <input type="text" id="newGroupName" class="login-input" placeholder="Nome Gruppo">
-            <button class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="createNewGroup()">+ Crea</button>
-            <button class="action-btn" style="margin-top: 15px;" onclick="closeGroupsModal()">Chiudi</button>
+            <h4 style="color:var(--text-main); margin-bottom: 5px;" data-i18n="create_group_title">Create New Group</h4>
+            <input type="text" id="newGroupName" class="login-input" data-i18n-ph="group_name_ph" placeholder="Group Name">
+            <button class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="createNewGroup()" data-i18n="create_btn">+ Create</button>
+            <button class="action-btn" style="margin-top: 15px;" onclick="closeGroupsModal()" data-i18n="close_btn">Close</button>
         </div>
     </div>
 
     <div id="sidebar">
         <div class="header">
-            <span>📓 Taccuini</span>
+            <span data-i18n="notebooks_title">📓 Notebooks</span>
             <span id="auth-status" style="font-size:10px; color:var(--accent-blue);"></span>
         </div>
         <div id="folders-container" class="list-container"></div>
         <div class="sidebar-actions">
-            <button class="action-btn" onclick="fetchDataFromServer()">🔄 Aggiorna</button>
-            <button id="admin-btn" class="action-btn" style="display:none;" onclick="openGroupsModal()">⚙️ Gruppi</button>
-            <button id="auth-btn" class="action-btn" onclick="handleAuthClick()">🔑 Accedi</button>
+            <button class="action-btn" onclick="fetchDataFromServer()" data-i18n="refresh_btn">🔄 Refresh</button>
+            <button id="admin-btn" class="action-btn" style="display:none;" onclick="openGroupsModal()" data-i18n="groups_btn">⚙️ Groups</button>
+            <button id="auth-btn" class="action-btn" onclick="handleAuthClick()" data-i18n="login_btn">🔑 Login</button>
         </div>
     </div>
     
     <div class="resizer" id="resizer-1"></div>
 
     <div id="notes-list">
-        <button class="mobile-back-btn" onclick="history.back()">🔙 Taccuini</button>
+        <button class="mobile-back-btn" onclick="history.back()" data-i18n="back_notebooks">🔙 Notebooks</button>
         <div class="search-grid">
-            <input type="text" id="searchInput" class="search-input-field" placeholder="🔍 Cerca titolo, testo o tag..." onkeyup="updateNoteList()">
+            <input type="text" id="searchInput" class="search-input-field" data-i18n-ph="search_ph" placeholder="🔍 Search title, body or tag..." onkeyup="updateNoteList()">
             <div class="search-row">
                 <select id="scopeSelect" class="search-select-field" onchange="updateTagDropdown(); updateNoteList();">
-                    <option value="all">🌍 Ovunque</option>
-                    <option value="current" selected>📁 Taccuino attuale</option>
+                    <option value="all" data-i18n="scope_all">🌍 Everywhere</option>
+                    <option value="current" selected data-i18n="scope_current">📁 Current notebook</option>
                 </select>
                 <select id="sortSelect" class="search-select-field" onchange="updateNoteList()">
                     <option value="title_asc">🔤 A - Z</option>
                     <option value="title_desc">🔤 Z - A</option>
-                    <option value="updated_desc">🕒 Recenti</option>
-                    <option value="updated_asc">🕒 Meno recenti</option>
+                    <option value="updated_desc" data-i18n="sort_recent">🕒 Most recent</option>
+                    <option value="updated_asc" data-i18n="sort_oldest">🕒 Least recent</option>
                 </select>
             </div>
             <div class="search-row">
                 <select id="tagSelect" class="search-select-field" onchange="updateNoteList()">
-                    <option value="">🏷️ Tutti i Tag</option>
+                    <option value="" data-i18n="tag_all">🏷️ All Tags</option>
                 </select>
                 <select id="hlSelect" class="search-select-field" onchange="updateNoteList()">
-                    <option value="">🖍️ Tutti i colori</option>
-                    <option value="any">🖍️ Evidenziate</option>
-                    <option value="yellow">🟡 Giallo</option>
-                    <option value="pink">🔴 Rosa</option>
-                    <option value="green">🟢 Verde</option>
-                    <option value="blue">🔵 Azzurro</option>
-                    <option value="orange">🟠 Arancione</option>
+                    <option value="" data-i18n="hl_all">🖍️ All Colors</option>
+                    <option value="any" data-i18n="hl_any">🖍️ Any Highlight</option>
+                    <option value="yellow" data-i18n="color_yellow">🟡 Yellow</option>
+                    <option value="pink" data-i18n="color_pink">🔴 Pink</option>
+                    <option value="green" data-i18n="color_green">🟢 Green</option>
+                    <option value="blue" data-i18n="color_blue">🔵 Blue</option>
+                    <option value="orange" data-i18n="color_orange">🟠 Orange</option>
                 </select>
             </div>
         </div>
         <div id="notes-container" class="list-container">
-            <div style="padding:15px; color:var(--text-muted); font-size: 13px;">Seleziona un taccuino...</div>
+            <div style="padding:15px; color:var(--text-muted); font-size: 13px;" data-i18n="select_notebook_prompt">Select a notebook...</div>
         </div>
     </div>
 
     <div class="resizer" id="resizer-2"></div>
 
     <div id="editor">
-        <button class="mobile-back-btn" onclick="history.back()">🔙 Note</button>
+        <button class="mobile-back-btn" onclick="history.back()" data-i18n="back_notes">🔙 Notes</button>
         <div class="editor-toolbar">
             <div style="display:flex; gap:8px;">
-                <button class="tb-btn" onclick="toggleZenMode()" title="Modalità Lettura Zen">📖 Zen Mode</button>
-                <button id="toc-btn" class="tb-btn" style="display:none;" onclick="toggleTOC()" title="Indice della nota">📜 Indice</button>
+                <button class="tb-btn" onclick="toggleZenMode()" title="Zen Reading Mode" data-i18n="zen_btn">📖 Zen Mode</button>
+                <button id="toc-btn" class="tb-btn" style="display:none;" onclick="toggleTOC()" title="Table of Contents" data-i18n="toc_btn">📜 TOC</button>
             </div>
-            <button class="tb-btn" onclick="toggleTheme()" title="Cambia Tema">☀️/🌙 Tema</button>
+            <div style="display:flex; gap:8px;">
+                <select id="langSelect" class="tb-btn" style="outline:none;" onchange="changeLanguage(this.value)">
+                    <option value="en">🌐 EN</option>
+                    <option value="it">🌐 IT</option>
+                </select>
+                <button class="tb-btn" onclick="toggleTheme()" title="Toggle Theme" data-i18n="theme_btn">☀️/🌙 Theme</button>
+            </div>
         </div>
         
         <div id="toc-menu" style="display:none; position:absolute; top:45px; left:20px; background:var(--bg-sidebar); border:1px solid var(--border-color); padding:10px 15px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.3); z-index:100; max-height:250px; overflow-y:auto; font-size:12px;"></div>
 
         <div id="editor-content">
-            <div style="color: var(--text-muted); text-align: center; margin-top: 20vh; font-size: 18px;">Seleziona una nota per la lettura</div>
+            <div style="color: var(--text-muted); text-align: center; margin-top: 20vh; font-size: 18px;" data-i18n="select_note_prompt">Select a note to read</div>
         </div>
     </div>
 
     <script>
+        // DIZIONARIO INTERNAZIONALIZZAZIONE (i18n)
+        const i18nDict = {
+            en: {
+                notebooks_title: "📓 Notebooks",
+                auth_authenticated: "🔓 Authenticated",
+                auth_public: "🌍 Public",
+                logout_btn: "🚪 Logout",
+                login_btn: "🔑 Login",
+                groups_btn: "⚙️ Groups",
+                refresh_btn: "🔄 Refresh",
+                favorites_title: "⭐ Favorites",
+                back_notebooks: "🔙 Notebooks",
+                back_notes: "🔙 Notes",
+                search_ph: "🔍 Search title, body or tag...",
+                scope_all: "🌍 Everywhere",
+                scope_current: "📁 Current notebook",
+                sort_recent: "🕒 Most recent",
+                sort_oldest: "🕒 Least recent",
+                tag_all: "🏷️ All Tags",
+                hl_all: "🖍️ All Colors",
+                hl_any: "🖍️ Any Highlight",
+                color_yellow: "Yellow",
+                color_pink: "Pink",
+                color_green: "Green",
+                color_blue: "Blue",
+                color_orange: "Orange",
+                color_remove: "❌ Remove",
+                select_notebook_prompt: "Select a notebook to start...",
+                no_notes_found: "No notes found",
+                select_note_prompt: "Select a note to read",
+                zen_btn: "📖 Zen Mode",
+                toc_btn: "📜 TOC",
+                theme_btn: "☀️/🌙 Theme",
+                cm_copy_link: "🔗 Copy Direct Link",
+                cm_open_tab: "🌍 Open in New Tab",
+                cm_highlight: "🖍️ Highlight Note",
+                cm_copy_md: "📋 Copy Text (MD)",
+                cm_print: "🖨️ Print to PDF",
+                toast_link_copied: "Direct link copied to clipboard!",
+                toast_copy_error: "Copy failed.",
+                toast_md_copied: "Markdown text copied to clipboard!",
+                toast_code_copied: "Code copied to clipboard!",
+                login_title: "Portal Login",
+                login_desc: "Session will expire when browser is closed.",
+                login_private_msg: "<span style='color:#ff6b6b; font-weight:bold;'>This note is private.</span><br>Please login to view it.",
+                cancel_btn: "Cancel",
+                groups_title: "⚙️ Group Management",
+                create_group_title: "Create New Group",
+                group_name_ph: "Group Name",
+                create_btn: "+ Create",
+                close_btn: "Close",
+                delete_btn: "Delete",
+                no_groups: "No groups created.",
+                note_not_found: "Note not found or permission denied.",
+                code_copy: "📋 Copy",
+                refreshing: "⏳ Refreshing..."
+            },
+            it: {
+                notebooks_title: "📓 Taccuini",
+                auth_authenticated: "🔓 Autenticato",
+                auth_public: "🌍 Pubblico",
+                logout_btn: "🚪 Esci",
+                login_btn: "🔑 Accedi",
+                groups_btn: "⚙️ Gruppi",
+                refresh_btn: "🔄 Aggiorna",
+                favorites_title: "⭐ Preferiti",
+                back_notebooks: "🔙 Taccuini",
+                back_notes: "🔙 Note",
+                search_ph: "🔍 Cerca titolo, testo o tag...",
+                scope_all: "🌍 Ovunque",
+                scope_current: "📁 Taccuino attuale",
+                sort_recent: "🕒 Più recenti",
+                sort_oldest: "🕒 Meno recenti",
+                tag_all: "🏷️ Tutti i Tag",
+                hl_all: "🖍️ Tutti i colori",
+                hl_any: "🖍️ Evidenziate",
+                color_yellow: "Giallo",
+                color_pink: "Rosa",
+                color_green: "Verde",
+                color_blue: "Azzurro",
+                color_orange: "Arancione",
+                color_remove: "❌ Rimuovi",
+                select_notebook_prompt: "Seleziona un taccuino per iniziare...",
+                no_notes_found: "Nessuna nota trovata",
+                select_note_prompt: "Seleziona una nota per la lettura",
+                zen_btn: "📖 Zen Mode",
+                toc_btn: "📜 Indice",
+                theme_btn: "☀️/🌙 Tema",
+                cm_copy_link: "🔗 Copia Link Diretto",
+                cm_open_tab: "🌍 Apri in Nuova Scheda",
+                cm_highlight: "🖍️ Evidenzia Nota",
+                cm_copy_md: "📋 Copia Testo (MD)",
+                cm_print: "🖨️ Stampa in PDF",
+                toast_link_copied: "Link diretto copiato negli appunti!",
+                toast_copy_error: "Errore durante la copia.",
+                toast_md_copied: "Testo Markdown copiato negli appunti!",
+                toast_code_copied: "Codice copiato!",
+                login_title: "Accedi al Portale",
+                login_desc: "La sessione scadrà alla chiusura del browser.",
+                login_private_msg: "<span style='color:#ff6b6b; font-weight:bold;'>Questa nota è privata.</span><br>Effettua l'accesso per visualizzarla.",
+                cancel_btn: "Annulla",
+                groups_title: "⚙️ Gestione Gruppi",
+                create_group_title: "Crea Nuovo Gruppo",
+                group_name_ph: "Nome Gruppo",
+                create_btn: "+ Crea",
+                close_btn: "Chiudi",
+                delete_btn: "Elimina",
+                no_groups: "Nessun gruppo creato.",
+                note_not_found: "Nota non trovata o non possiedi i permessi per visualizzarla.",
+                code_copy: "📋 Copia",
+                refreshing: "⏳ Aggiornamento..."
+            }
+        };
+
+        let currentLang = getInitialLanguage();
+
+        function getInitialLanguage() {
+            const saved = localStorage.getItem('app_lang');
+            if (saved && (saved === 'it' || saved === 'en')) return saved;
+            const browserLang = navigator.language || navigator.userLanguage || '';
+            return browserLang.toLowerCase().startsWith('it') ? 'it' : 'en';
+        }
+
+        function t(key) {
+            return (i18nDict[currentLang] && i18nDict[currentLang][key]) || (i18nDict['en'][key]) || key;
+        }
+
+        function changeLanguage(lang) {
+            currentLang = lang;
+            localStorage.setItem('app_lang', lang);
+            document.documentElement.lang = lang;
+            applyTranslations();
+        }
+
+        function applyTranslations() {
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                el.innerHTML = t(key);
+            });
+
+            document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+                const key = el.getAttribute('data-i18n-ph');
+                el.placeholder = t(key);
+            });
+
+            const langSelect = document.getElementById('langSelect');
+            if (langSelect) langSelect.value = currentLang;
+
+            updateAuthUI();
+            renderFolderTree();
+            updateTagDropdown();
+            updateNoteList();
+        }
+
         let allFolders = [];
         let allNotes = [];
         let systemUsers = [];
@@ -283,8 +441,9 @@
         window.onload = function() {
             if (localStorage.getItem('theme') === 'light') document.body.classList.add('light-theme');
             if (window.innerWidth <= 768) history.replaceState({ panel: 'sidebar' }, '', window.location.search || '#sidebar');
+            
             initResizers();
-            updateAuthUI();
+            applyTranslations();
             
             document.addEventListener('click', (e) => {
                 if(!e.target.closest('#toc-btn') && !e.target.closest('#toc-menu')) document.getElementById('toc-menu').style.display = 'none';
@@ -378,9 +537,13 @@
             const adminBtn = document.getElementById('admin-btn');
             const authStatus = document.getElementById('auth-status');
             if (loggedUserId) {
-                authBtn.innerText = '🚪 Esci'; authStatus.innerText = '🔓 Autenticato'; adminBtn.style.display = isAdmin ? 'block' : 'none';
+                authBtn.innerText = t('logout_btn'); 
+                authStatus.innerText = t('auth_authenticated'); 
+                adminBtn.style.display = isAdmin ? 'block' : 'none';
             } else {
-                authBtn.innerText = '🔑 Accedi'; authStatus.innerText = '🌍 Pubblico'; adminBtn.style.display = 'none';
+                authBtn.innerText = t('login_btn'); 
+                authStatus.innerText = t('auth_public'); 
+                adminBtn.style.display = 'none';
             }
         }
 
@@ -389,7 +552,7 @@
                 sessionStorage.removeItem('joplin_user_id'); sessionStorage.removeItem('joplin_is_admin');
                 loggedUserId = null; isAdmin = false; updateAuthUI(); fetchDataFromServer();
             } else {
-                document.getElementById('login-msg').innerText = 'La sessione scadrà alla chiusura del browser.';
+                document.getElementById('login-msg').innerText = t('login_desc');
                 document.getElementById('login-modal').style.display = 'flex';
             }
         }
@@ -401,11 +564,11 @@
             try {
                 const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
                 const data = await res.json();
-                if(!res.ok) return alert('Errore: ' + data.error);
+                if(!res.ok) return alert('Error: ' + data.error);
                 
                 sessionStorage.setItem('joplin_user_id', data.userId); sessionStorage.setItem('joplin_is_admin', data.isAdmin);
                 loggedUserId = data.userId; isAdmin = data.isAdmin; closeLoginModal(); updateAuthUI(); fetchDataFromServer();
-            } catch(e) { alert('Errore connessione'); }
+            } catch(e) { alert('Connection Error'); }
         }
 
         async function fetchPreferences() {
@@ -449,7 +612,7 @@
         async function fetchDataFromServer() {
             const refreshBtn = document.querySelector('.sidebar-actions .action-btn');
             const originalText = refreshBtn ? refreshBtn.innerText : '';
-            if (refreshBtn) refreshBtn.innerText = '⏳ Aggiornamento...';
+            if (refreshBtn) refreshBtn.innerText = t('refreshing');
 
             try {
                 await fetchPreferences();
@@ -473,10 +636,10 @@
                         expandFolderAndParents(currentFolderId);
                     } else {
                         if (!loggedUserId) {
-                            document.getElementById('login-msg').innerHTML = '<span style="color:#ff6b6b; font-weight:bold;">Questa nota è privata.</span><br>Effettua l\'accesso per visualizzarla.';
+                            document.getElementById('login-msg').innerHTML = t('login_private_msg');
                             document.getElementById('login-modal').style.display = 'flex';
                         } else {
-                            alert("Nota non trovata o non possiedi i permessi per visualizzarla.");
+                            alert(t('note_not_found'));
                         }
                     }
                 }
@@ -493,7 +656,7 @@
                     if (openNote) { renderContent(openNote); showPanel('editor', true); }
                 }
             } catch(e) {
-                console.error("Errore aggiornamento dati:", e);
+                console.error("Data update error:", e);
             } finally {
                 if (refreshBtn) refreshBtn.innerText = originalText;
             }
@@ -502,10 +665,10 @@
         async function openGroupsModal() { const res = await fetch('/api/users-and-groups'); const data = await res.json(); systemUsers = data.users || []; systemGroups = data.groups || []; renderGroupsList(); document.getElementById('groups-modal').style.display = 'flex'; }
         function closeGroupsModal() { saveGroupsToServer(); document.getElementById('groups-modal').style.display = 'none'; }
         async function saveGroupsToServer() { await fetch('/api/admin/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groups: systemGroups }) }); }
-        function createNewGroup() { const name = document.getElementById('newGroupName').value.trim(); if (!name) return alert('Inserisci un nome'); systemGroups.push({ id: 'grp_' + Date.now(), name: name, members: [] }); document.getElementById('newGroupName').value = ''; renderGroupsList(); }
+        function createNewGroup() { const name = document.getElementById('newGroupName').value.trim(); if (!name) return alert('Enter a name'); systemGroups.push({ id: 'grp_' + Date.now(), name: name, members: [] }); document.getElementById('newGroupName').value = ''; renderGroupsList(); }
         function deleteGroup(groupId) { systemGroups = systemGroups.filter(g => g.id !== groupId); renderGroupsList(); }
         function toggleMember(groupId, email) { const group = systemGroups.find(g => g.id === groupId); if (!group) return; if (!group.members) group.members = []; if (group.members.includes(email)) group.members = group.members.filter(m => m !== email); else group.members.push(email); }
-        function renderGroupsList() { const container = document.getElementById('groups-container-list'); container.innerHTML = ''; if (systemGroups.length === 0) { container.innerHTML = '<div style="color:#888; font-size:13px;">Nessun gruppo creato.</div>'; return; } systemGroups.forEach(g => { const card = document.createElement('div'); card.style.cssText = 'background: var(--bg-editor); padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border-color);'; let usersHtml = ''; systemUsers.forEach(u => { const isChecked = g.members && g.members.includes(u.email) ? 'checked' : ''; usersHtml += `<label style="display:block; font-size:12px; margin:3px 0; color:var(--text-main);"><input type="checkbox" ${isChecked} onchange="toggleMember('${g.id}', '${u.email}')"> ${u.email}</label>`; }); card.innerHTML = ` <div style="display:flex; justify-between; align-items:center; margin-bottom: 8px;"> <strong style="color:var(--text-main); font-size: 14px;">👥 ${g.name}</strong> <button style="background:#a93226; color:white; border:none; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" onclick="deleteGroup('${g.id}')">Elimina</button> </div> <div style="max-height: 100px; overflow-y:auto; border-top:1px solid var(--border-color); padding-top:5px;"> ${usersHtml} </div>`; container.appendChild(card); }); }
+        function renderGroupsList() { const container = document.getElementById('groups-container-list'); container.innerHTML = ''; if (systemGroups.length === 0) { container.innerHTML = `<div style="color:var(--text-muted); font-size:13px;">${t('no_groups')}</div>`; return; } systemGroups.forEach(g => { const card = document.createElement('div'); card.style.cssText = 'background: var(--bg-editor); padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border-color);'; let usersHtml = ''; systemUsers.forEach(u => { const isChecked = g.members && g.members.includes(u.email) ? 'checked' : ''; usersHtml += `<label style="display:block; font-size:12px; margin:3px 0; color:var(--text-main);"><input type="checkbox" ${isChecked} onchange="toggleMember('${g.id}', '${u.email}')"> ${u.email}</label>`; }); card.innerHTML = ` <div style="display:flex; justify-between; align-items:center; margin-bottom: 8px;"> <strong style="color:var(--text-main); font-size: 14px;">👥 ${g.name}</strong> <button style="background:#a93226; color:white; border:none; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" onclick="deleteGroup('${g.id}')">${t('delete_btn')}</button> </div> <div style="max-height: 100px; overflow-y:auto; border-top:1px solid var(--border-color); padding-top:5px;"> ${usersHtml} </div>`; container.appendChild(card); }); }
 
         function getRecursiveNoteCount(folderId) {
             let count = allNotes.filter(n => n.parent_id === folderId).length;
@@ -553,7 +716,7 @@
                 const noteCount = getRecursiveNoteCount(folder.id);
 
                 const countBadge = `<span style="font-size:11px; color: var(--text-muted); margin-left: auto; padding-left: 8px;">${noteCount}</span>`;
-                const pinHtml = `<span class="pin-btn ${isPinned ? 'pinned' : ''}" onclick="togglePin(event, '${folder.id}')" title="Punta/Sblocca">📌</span>`;
+                const pinHtml = `<span class="pin-btn ${isPinned ? 'pinned' : ''}" onclick="togglePin(event, '${folder.id}')" title="Pin/Unpin">📌</span>`;
                 const arrow = hasChildren ? `<span class="toggle-arrow ${isExpanded ? 'open' : ''}">▶</span>` : `<span class="toggle-arrow" style="visibility:hidden;">▶</span>`;
                 const icon = folder.icon ? `<span style="margin-right: 8px;">${folder.icon}</span>` : `<span style="margin-right: 8px;">📁</span>`;
                 
@@ -600,7 +763,7 @@
             if (pinnedFolders.length > 0) {
                 const favHeader = document.createElement('div');
                 favHeader.style.cssText = 'padding: 10px 15px 5px 15px; font-size: 11px; font-weight: bold; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;';
-                favHeader.innerText = '⭐ Preferiti';
+                favHeader.innerText = t('favorites_title');
                 container.appendChild(favHeader);
 
                 pinnedFolders.forEach(fid => {
@@ -620,7 +783,7 @@
             const tagSelect = document.getElementById('tagSelect');
             if (!tagSelect) return;
             const currentVal = tagSelect.value;
-            tagSelect.innerHTML = '<option value="">🏷️ Tutti i Tag</option>';
+            tagSelect.innerHTML = `<option value="">${t('tag_all')}</option>`;
             const scopeVal = document.getElementById('scopeSelect') ? document.getElementById('scopeSelect').value : 'current';
             const folderNotes = (scopeVal === 'all') ? allNotes : allNotes.filter(n => n.parent_id === currentFolderId);
             const uniqueTags = new Set();
@@ -646,8 +809,8 @@
         function cmCopyLink() {
             const link = window.location.origin + window.location.pathname + '?note=' + ctxNote.id;
             navigator.clipboard.writeText(link)
-                .then(() => showToast('Link diretto copiato negli appunti!'))
-                .catch(() => showToast('Errore durante la copia.'));
+                .then(() => showToast(t('toast_link_copied')))
+                .catch(() => showToast(t('toast_copy_error')));
             document.getElementById('context-menu').style.display = 'none';
         }
 
@@ -670,8 +833,8 @@
 
         function cmCopyMarkdown() {
             navigator.clipboard.writeText(ctxNote.body)
-                .then(() => showToast('Testo Markdown copiato negli appunti!'))
-                .catch(() => showToast('Errore durante la copia.'));
+                .then(() => showToast(t('toast_md_copied')))
+                .catch(() => showToast(t('toast_copy_error')));
             document.getElementById('context-menu').style.display = 'none';
         }
 
@@ -729,7 +892,7 @@
 
             container.innerHTML = '';
             if (filtered.length === 0) {
-                const emptyMsg = scopeVal === 'current' && !currentFolderId ? 'Seleziona un taccuino per iniziare...' : 'Nessuna nota trovata';
+                const emptyMsg = scopeVal === 'current' && !currentFolderId ? t('select_notebook_prompt') : t('no_notes_found');
                 container.innerHTML = `<div style="padding:15px; color:var(--text-muted);">${emptyMsg}</div>`; 
                 return;
             }
@@ -784,13 +947,11 @@
         function renderContent(note) {
             const editorContent = document.getElementById('editor-content');
             
-            // CORREZIONE BUG REGEX RISORSE JOPLIN
             let cleanBody = note.body.replace(/:\/([a-zA-Z0-9]{32})(?:\.([a-zA-Z0-9]+))?/g, '/api/resource/$1');
             let htmlContent = marked.parse(cleanBody);
             
             editorContent.innerHTML = `<h1>${note.title}</h1><div id="md-rendered-body">${htmlContent}</div>`;
 
-            // EVENTI IMMAGINI E LINK
             editorContent.querySelectorAll('img').forEach(img => {
                 img.onclick = function() { openLightbox(this.src); };
             });
@@ -800,19 +961,17 @@
                 a.setAttribute('rel', 'noopener noreferrer');
             });
 
-            // GESTIONE BOTTONI COPIA CODICE
             editorContent.querySelectorAll('pre').forEach(pre => {
                 const btn = document.createElement('button');
                 btn.className = 'code-copy-btn';
-                btn.innerText = '📋 Copia';
+                btn.innerText = t('code_copy');
                 btn.onclick = () => {
                     const codeText = pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText;
-                    navigator.clipboard.writeText(codeText).then(() => showToast('Codice copiato!'));
+                    navigator.clipboard.writeText(codeText).then(() => showToast(t('toast_code_copied')));
                 };
                 pre.appendChild(btn);
             });
 
-            // COSTRUZIONE INDICE (TOC)
             const headings = editorContent.querySelectorAll('h1, h2, h3');
             const tocBtn = document.getElementById('toc-btn');
             const tocMenu = document.getElementById('toc-menu');
