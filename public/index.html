@@ -16,16 +16,29 @@
             --accent-blue: #0e639c;
             --hover-bg: #353b42;
             --border-color: #3a3f45;
+            --code-bg: #2d3139;
         }
 
-        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; height: 100vh; background-color: var(--bg-editor); color: var(--text-main); overflow: hidden; }
+        body.light-theme {
+            --bg-sidebar: #f0f2f5;
+            --bg-notelist: #e4e7eb;
+            --bg-editor: #ffffff;
+            --text-main: #1f2328;
+            --text-muted: #636c76;
+            --accent-blue: #0969da;
+            --hover-bg: #d0d7de;
+            --border-color: #d0d7de;
+            --code-bg: #f6f8fa;
+        }
+
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; height: 100vh; background-color: var(--bg-editor); color: var(--text-main); overflow: hidden; transition: background-color 0.2s, color 0.2s; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
 
         #sidebar { width: 260px; background-color: var(--bg-sidebar); display: flex; flex-direction: column; flex-shrink: 0; }
         #notes-list { width: 340px; background-color: var(--bg-notelist); display: flex; flex-direction: column; flex-shrink: 0; border-left: 1px solid var(--border-color); }
-        #editor { flex-grow: 1; padding: 0; overflow-y: auto; background-color: var(--bg-editor); font-size: 15px; line-height: 1.6; min-width: 300px; display: flex; flex-direction: column; }
+        #editor { flex-grow: 1; padding: 0; overflow-y: auto; background-color: var(--bg-editor); font-size: 15px; line-height: 1.6; min-width: 300px; display: flex; flex-direction: column; position: relative; }
         
         .resizer { width: 4px; background-color: var(--border-color); cursor: col-resize; flex-shrink: 0; z-index: 10; transition: background-color 0.2s; }
         .resizer:hover, .resizer.active { background-color: var(--accent-blue); }
@@ -33,11 +46,11 @@
         .header { padding: 12px 15px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
         .list-container { overflow-y: auto; flex-grow: 1; padding-bottom: 20px;}
         
-        .folder-item { cursor: pointer; font-size: 13px; color: #ccc; }
+        .folder-item { cursor: pointer; font-size: 13px; color: var(--text-main); }
         .folder-title { padding: 6px 10px; display: flex; align-items: center; position: relative; }
         .folder-title:hover { background-color: var(--hover-bg); }
         .folder-title.active { background-color: var(--accent-blue); color: white; }
-        .children-container { border-left: 1px solid #444; margin-left: 20px; }
+        .children-container { border-left: 1px solid var(--border-color); margin-left: 20px; }
         .toggle-arrow { display: inline-block; width: 20px; padding: 5px 0; font-size: 10px; color: var(--text-muted); transition: transform 0.2s; text-align: center; }
         .toggle-arrow.open { transform: rotate(90deg); }
 
@@ -54,51 +67,58 @@
         .note-item.active { background-color: var(--accent-blue); color: white; }
         
         .note-item.hl-yellow { background-color: #3b3a16; border-left: 4px solid #ffd700; }
-        .note-item.hl-yellow.active { background-color: #4b4917; }
         .note-item.hl-pink { background-color: #3b1622; border-left: 4px solid #ff7b93; }
-        .note-item.hl-pink.active { background-color: #4b172a; }
         .note-item.hl-green { background-color: #163b22; border-left: 4px solid #50c878; }
-        .note-item.hl-green.active { background-color: #174b2a; }
         .note-item.hl-blue { background-color: #162a3b; border-left: 4px solid #4da6ff; }
-        .note-item.hl-blue.active { background-color: #17374b; }
         .note-item.hl-orange { background-color: #3b2816; border-left: 4px solid #ff9f00; }
-        .note-item.hl-orange.active { background-color: #4b3217; }
         
-        .search-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border-bottom: 1px solid var(--border-color); padding: 10px; background-color: #262a2f; }
-        .search-input-field { width: 100%; box-sizing: border-box; padding: 7px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); border-radius: 4px; color: white; font-size: 12px; outline: none; }
-        .search-select-field { width: 100%; box-sizing: border-box; padding: 7px 8px; background-color: #1a1c1f; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; font-size: 12px; outline: none; cursor: pointer; }
+        .search-grid { display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--border-color); padding: 10px; background-color: var(--bg-sidebar); }
+        .search-row { display: flex; gap: 6px; }
+        .search-input-field { width: 100%; box-sizing: border-box; padding: 7px 10px; background-color: var(--bg-editor); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-main); font-size: 12px; outline: none; }
+        .search-select-field { width: 100%; box-sizing: border-box; padding: 6px; background-color: var(--bg-editor); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; font-size: 11px; outline: none; cursor: pointer; }
+
+        .editor-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 20px; border-bottom: 1px solid var(--border-color); background-color: var(--bg-sidebar); }
+        .tb-btn { background: transparent; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+        .tb-btn:hover { background-color: var(--hover-bg); }
 
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 2000; }
         .modal-card { background: var(--bg-sidebar); padding: 25px; border-radius: 8px; width: 450px; border: 1px solid var(--border-color); max-height: 80vh; overflow-y: auto; }
-        input.login-input { padding: 10px; margin: 8px 0; font-size: 14px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-notelist); color: white; width: 100%; box-sizing: border-box; }
+        input.login-input { padding: 10px; margin: 8px 0; font-size: 14px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-notelist); color: var(--text-main); width: 100%; box-sizing: border-box; }
 
         #editor-content { padding: 40px; max-width: 900px; margin: 0 auto; width: 100%; box-sizing: border-box; }
-        #editor h1 { font-size: 1.8em; margin-bottom: 0.5em; color: white; }
-        #editor h2, #editor h3 { color: #569cd6; border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 30px; }
-        #editor a { color: #569cd6; text-decoration: none; }
+        #editor h1 { font-size: 1.8em; margin-bottom: 0.5em; color: var(--text-main); }
+        #editor h2, #editor h3 { color: var(--accent-blue); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 30px; }
+        #editor a { color: var(--accent-blue); text-decoration: none; }
         #editor img { max-width: 100%; border-radius: 4px; cursor: zoom-in; }
+
+        /* FORMATTAZIONE CODE BLOCKS */
+        #editor pre { background: var(--code-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; overflow-x: auto; position: relative; }
+        .code-copy-btn { position: absolute; top: 6px; right: 6px; background: var(--bg-sidebar); border: 1px solid var(--border-color); color: var(--text-muted); font-size: 10px; padding: 3px 8px; border-radius: 3px; cursor: pointer; }
+        .code-copy-btn:hover { color: var(--text-main); background: var(--hover-bg); }
 
         #lightbox { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.88); z-index: 3000; justify-content: center; align-items: center; cursor: zoom-out; }
         #lightbox img { max-width: 92%; max-height: 92%; border-radius: 6px; box-shadow: 0 0 25px rgba(0,0,0,0.8); }
 
-        #context-menu { display: none; position: absolute; background: #1a1c1f; border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.6); z-index: 10000; min-width: 180px; padding: 5px 0; }
+        #context-menu { display: none; position: absolute; background: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.6); z-index: 10000; min-width: 180px; padding: 5px 0; }
         .cm-item { padding: 8px 15px; cursor: pointer; font-size: 13px; color: var(--text-main); display: flex; align-items: center; justify-content: space-between; gap: 10px; position: relative; }
-        .cm-item:hover { background: var(--hover-bg); color: white; }
+        .cm-item:hover { background: var(--hover-bg); }
         
         .cm-has-submenu:hover .cm-submenu { display: block; }
-        .cm-submenu { display: none; position: absolute; left: 100%; top: -5px; background: #1a1c1f; border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.6); min-width: 140px; padding: 5px 0; z-index: 10001; }
+        .cm-submenu { display: none; position: absolute; left: 100%; top: -5px; background: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.6); min-width: 140px; padding: 5px 0; z-index: 10001; }
         #context-menu.menu-left .cm-submenu { left: auto; right: 100%; }
         
         .color-circle { width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 
-        /* TOAST NOTIFICATION */
-        #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #2d3238; border: 1px solid var(--border-color); color: white; padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 500; box-shadow: 0 5px 15px rgba(0,0,0,0.5); opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0.3s; z-index: 10000; display: flex; align-items: center; gap: 10px; }
+        #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--bg-sidebar); border: 1px solid var(--border-color); color: var(--text-main); padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 500; box-shadow: 0 5px 15px rgba(0,0,0,0.5); opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0.3s; z-index: 10000; display: flex; align-items: center; gap: 10px; }
         #toast.show { opacity: 1; visibility: visible; }
+
+        /* ZEN MODE (ZEN-FULLSCREEN) */
+        body.zen-mode #sidebar, body.zen-mode #notes-list, body.zen-mode .resizer { display: none !important; }
 
         @media print {
             @page { margin: 1.5cm; size: auto; }
             body, html { display: block !important; height: auto !important; margin: 0 !important; padding: 0 !important; background: white !important; color: black !important; overflow: visible !important; }
-            #sidebar, #notes-list, .resizer, .mobile-back-btn, #lightbox, .modal-overlay, #context-menu, #toast, .header { display: none !important; }
+            #sidebar, #notes-list, .resizer, .mobile-back-btn, #lightbox, .modal-overlay, #context-menu, #toast, .editor-toolbar, .header { display: none !important; }
             #editor { display: block !important; width: 100% !important; height: auto !important; overflow: visible !important; background: white !important; color: black !important; padding: 0 !important; margin: 0 !important; border: none !important; }
             #editor-content { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
             #editor h1, #editor h2, #editor h3, #editor a, #editor p, #editor li, #editor span, #editor div { color: black !important; }
@@ -108,7 +128,7 @@
             #editor pre { white-space: pre-wrap; word-wrap: break-word; border: 1px solid #ccc; padding: 10px; }
         }
 
-        .mobile-back-btn { display: none; background: #1a1c1f; color: #569cd6; border: none; border-bottom: 1px solid var(--border-color); padding: 15px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: left; width: 100%; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .mobile-back-btn { display: none; background: var(--bg-sidebar); color: var(--accent-blue); border: none; border-bottom: 1px solid var(--border-color); padding: 15px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: left; width: 100%; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
 
         @media (max-width: 768px) {
             .resizer { display: none !important; }
@@ -152,8 +172,8 @@
     <div id="login-modal" class="modal-overlay">
         <div class="modal-card" style="width: 320px;">
             <form onsubmit="event.preventDefault(); performLogin();">
-                <h3 style="margin-top:0; color:white;">Accedi al Portale</h3>
-                <p id="login-msg" style="font-size: 12px; color: #aaa; margin-bottom: 15px;">La sessione scadrà alla chiusura del browser.</p>
+                <h3 style="margin-top:0; color:var(--text-main);">Accedi al Portale</h3>
+                <p id="login-msg" style="font-size: 12px; color: var(--text-muted); margin-bottom: 15px;">La sessione scadrà alla chiusura del browser.</p>
                 <input type="email" id="emailInput" class="login-input" placeholder="Email" required>
                 <input type="password" id="passwordInput" class="login-input" placeholder="Password" required>
                 <button type="submit" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 10px;">Accedi</button>
@@ -164,10 +184,10 @@
 
     <div id="groups-modal" class="modal-overlay">
         <div class="modal-card">
-            <h3 style="margin-top:0; color:white;">⚙️ Gestione Gruppi</h3>
+            <h3 style="margin-top:0; color:var(--text-main);">⚙️ Gestione Gruppi</h3>
             <div id="groups-container-list"></div>
             <hr style="border-color: var(--border-color); margin: 15px 0;">
-            <h4 style="color:white; margin-bottom: 5px;">Crea Nuovo Gruppo</h4>
+            <h4 style="color:var(--text-main); margin-bottom: 5px;">Crea Nuovo Gruppo</h4>
             <input type="text" id="newGroupName" class="login-input" placeholder="Nome Gruppo">
             <button class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="createNewGroup()">+ Crea</button>
             <button class="action-btn" style="margin-top: 15px;" onclick="closeGroupsModal()">Chiudi</button>
@@ -177,12 +197,12 @@
     <div id="sidebar">
         <div class="header">
             <span>📓 Taccuini</span>
-            <span id="auth-status" style="font-size:10px; color:#569cd6;"></span>
+            <span id="auth-status" style="font-size:10px; color:var(--accent-blue);"></span>
         </div>
         <div id="folders-container" class="list-container"></div>
         <div class="sidebar-actions">
             <button class="action-btn" onclick="fetchDataFromServer()">🔄 Aggiorna</button>
-            <button id="admin-btn" class="action-btn" style="display:none; background:#2d3238;" onclick="openGroupsModal()">⚙️ Gruppi</button>
+            <button id="admin-btn" class="action-btn" style="display:none;" onclick="openGroupsModal()">⚙️ Gruppi</button>
             <button id="auth-btn" class="action-btn" onclick="handleAuthClick()">🔑 Accedi</button>
         </div>
     </div>
@@ -192,36 +212,36 @@
     <div id="notes-list">
         <button class="mobile-back-btn" onclick="history.back()">🔙 Taccuini</button>
         <div class="search-grid">
-            <input type="text" id="searchInput" class="search-input-field" style="grid-column: 1 / -1;" placeholder="🔍 Cerca titolo, testo o tag..." onkeyup="updateNoteList()">
-            
-            <select id="scopeSelect" class="search-select-field" style="grid-column: 1 / -1;" onchange="updateTagDropdown(); updateNoteList();">
-                <option value="all">🌍 Cerca ovunque</option>
-                <option value="current" selected>📁 Solo taccuino selezionato</option>
-            </select>
-            
-            <select id="sortSelect" class="search-select-field" style="grid-column: 1 / -1;" onchange="updateNoteList()">
-                <option value="title_asc">🔤 Nome (A - Z)</option>
-                <option value="title_desc">🔤 Nome (Z - A)</option>
-                <option value="updated_desc">🕒 Più recenti</option>
-                <option value="updated_asc">🕒 Meno recenti</option>
-            </select>
-            
-            <select id="tagSelect" class="search-select-field" onchange="updateNoteList()">
-                <option value="">🏷️ Tutti i Tag</option>
-            </select>
-
-            <select id="hlSelect" class="search-select-field" onchange="updateNoteList()">
-                <option value="">🖍️ Tutti i colori</option>
-                <option value="any">🖍️ Qualsiasi Evidenza</option>
-                <option value="yellow">🟡 Giallo</option>
-                <option value="pink">🔴 Rosa</option>
-                <option value="green">🟢 Verde</option>
-                <option value="blue">🔵 Azzurro</option>
-                <option value="orange">🟠 Arancione</option>
-            </select>
+            <input type="text" id="searchInput" class="search-input-field" placeholder="🔍 Cerca titolo, testo o tag..." onkeyup="updateNoteList()">
+            <div class="search-row">
+                <select id="scopeSelect" class="search-select-field" onchange="updateTagDropdown(); updateNoteList();">
+                    <option value="all">🌍 Ovunque</option>
+                    <option value="current" selected>📁 Taccuino attuale</option>
+                </select>
+                <select id="sortSelect" class="search-select-field" onchange="updateNoteList()">
+                    <option value="title_asc">🔤 A - Z</option>
+                    <option value="title_desc">🔤 Z - A</option>
+                    <option value="updated_desc">🕒 Recenti</option>
+                    <option value="updated_asc">🕒 Meno recenti</option>
+                </select>
+            </div>
+            <div class="search-row">
+                <select id="tagSelect" class="search-select-field" onchange="updateNoteList()">
+                    <option value="">🏷️ Tutti i Tag</option>
+                </select>
+                <select id="hlSelect" class="search-select-field" onchange="updateNoteList()">
+                    <option value="">🖍️ Tutti i colori</option>
+                    <option value="any">🖍️ Evidenziate</option>
+                    <option value="yellow">🟡 Giallo</option>
+                    <option value="pink">🔴 Rosa</option>
+                    <option value="green">🟢 Verde</option>
+                    <option value="blue">🔵 Azzurro</option>
+                    <option value="orange">🟠 Arancione</option>
+                </select>
+            </div>
         </div>
         <div id="notes-container" class="list-container">
-            <div style="padding:15px; color:#888; font-size: 13px;">Seleziona un taccuino...</div>
+            <div style="padding:15px; color:var(--text-muted); font-size: 13px;">Seleziona un taccuino...</div>
         </div>
     </div>
 
@@ -229,8 +249,18 @@
 
     <div id="editor">
         <button class="mobile-back-btn" onclick="history.back()">🔙 Note</button>
+        <div class="editor-toolbar">
+            <div style="display:flex; gap:8px;">
+                <button class="tb-btn" onclick="toggleZenMode()" title="Modalità Lettura Zen">📖 Zen Mode</button>
+                <button id="toc-btn" class="tb-btn" style="display:none;" onclick="toggleTOC()" title="Indice della nota">📜 Indice</button>
+            </div>
+            <button class="tb-btn" onclick="toggleTheme()" title="Cambia Tema">☀️/🌙 Tema</button>
+        </div>
+        
+        <div id="toc-menu" style="display:none; position:absolute; top:45px; left:20px; background:var(--bg-sidebar); border:1px solid var(--border-color); padding:10px 15px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.3); z-index:100; max-height:250px; overflow-y:auto; font-size:12px;"></div>
+
         <div id="editor-content">
-            <div style="color: #888; text-align: center; margin-top: 20vh; font-size: 18px;">Seleziona una nota per la lettura</div>
+            <div style="color: var(--text-muted); text-align: center; margin-top: 20vh; font-size: 18px;">Seleziona una nota per la lettura</div>
         </div>
     </div>
 
@@ -251,17 +281,27 @@
         let ctxNote = null; 
 
         window.onload = function() {
-            if (window.innerWidth <= 768) {
-                history.replaceState({ panel: 'sidebar' }, '', window.location.search || '#sidebar');
-            }
+            if (localStorage.getItem('theme') === 'light') document.body.classList.add('light-theme');
+            if (window.innerWidth <= 768) history.replaceState({ panel: 'sidebar' }, '', window.location.search || '#sidebar');
             initResizers();
             updateAuthUI();
             
-            document.addEventListener('click', () => { document.getElementById('context-menu').style.display = 'none'; });
+            document.addEventListener('click', (e) => {
+                if(!e.target.closest('#toc-btn') && !e.target.closest('#toc-menu')) document.getElementById('toc-menu').style.display = 'none';
+                document.getElementById('context-menu').style.display = 'none'; 
+            });
             fetchDataFromServer();
         };
 
-        // GESTIONE TOAST NOTIFICATION
+        function toggleTheme() {
+            document.body.classList.toggle('light-theme');
+            localStorage.setItem('theme', document.body.classList.contains('light-theme') ? 'light' : 'dark');
+        }
+
+        function toggleZenMode() {
+            document.body.classList.toggle('zen-mode');
+        }
+
         function showToast(message) {
             const toast = document.getElementById('toast');
             toast.innerHTML = '<span>✅</span> ' + message;
@@ -269,7 +309,6 @@
             setTimeout(() => { toast.classList.remove('show'); }, 3000);
         }
 
-        // ESPANSIONE AUTOMATICA CARTELLE GENITORE
         function expandFolderAndParents(folderId) {
             if (!folderId) return;
             expandedFolderIds.add(folderId);
@@ -316,7 +355,7 @@
         }
 
         function showPanel(panelName, pushHistory = true) {
-            document.body.className = 'view-' + panelName;
+            document.body.className = (document.body.classList.contains('light-theme') ? 'light-theme ' : '') + 'view-' + panelName;
             if (pushHistory && window.innerWidth <= 768) {
                 history.pushState({ panel: panelName }, '', window.location.search || '#' + panelName);
             }
@@ -324,9 +363,7 @@
 
         window.onpopstate = function(event) {
             const lb = document.getElementById('lightbox');
-            if (lb && lb.style.display === 'flex') {
-                lb.style.display = 'none'; return;
-            }
+            if (lb && lb.style.display === 'flex') { lb.style.display = 'none'; return; }
             if (window.innerWidth <= 768) {
                 if (event.state && event.state.panel) showPanel(event.state.panel, false);
                 else showPanel('sidebar', false);
@@ -468,7 +505,7 @@
         function createNewGroup() { const name = document.getElementById('newGroupName').value.trim(); if (!name) return alert('Inserisci un nome'); systemGroups.push({ id: 'grp_' + Date.now(), name: name, members: [] }); document.getElementById('newGroupName').value = ''; renderGroupsList(); }
         function deleteGroup(groupId) { systemGroups = systemGroups.filter(g => g.id !== groupId); renderGroupsList(); }
         function toggleMember(groupId, email) { const group = systemGroups.find(g => g.id === groupId); if (!group) return; if (!group.members) group.members = []; if (group.members.includes(email)) group.members = group.members.filter(m => m !== email); else group.members.push(email); }
-        function renderGroupsList() { const container = document.getElementById('groups-container-list'); container.innerHTML = ''; if (systemGroups.length === 0) { container.innerHTML = '<div style="color:#888; font-size:13px;">Nessun gruppo creato.</div>'; return; } systemGroups.forEach(g => { const card = document.createElement('div'); card.style.cssText = 'background: #2a2e33; padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid #3a3f45;'; let usersHtml = ''; systemUsers.forEach(u => { const isChecked = g.members && g.members.includes(u.email) ? 'checked' : ''; usersHtml += `<label style="display:block; font-size:12px; margin:3px 0; color:#ccc;"><input type="checkbox" ${isChecked} onchange="toggleMember('${g.id}', '${u.email}')"> ${u.email}</label>`; }); card.innerHTML = ` <div style="display:flex; justify-between; align-items:center; margin-bottom: 8px;"> <strong style="color:white; font-size: 14px;">👥 ${g.name}</strong> <button style="background:#a93226; color:white; border:none; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" onclick="deleteGroup('${g.id}')">Elimina</button> </div> <div style="max-height: 100px; overflow-y:auto; border-top:1px solid #3a3f45; padding-top:5px;"> ${usersHtml} </div>`; container.appendChild(card); }); }
+        function renderGroupsList() { const container = document.getElementById('groups-container-list'); container.innerHTML = ''; if (systemGroups.length === 0) { container.innerHTML = '<div style="color:#888; font-size:13px;">Nessun gruppo creato.</div>'; return; } systemGroups.forEach(g => { const card = document.createElement('div'); card.style.cssText = 'background: var(--bg-editor); padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border-color);'; let usersHtml = ''; systemUsers.forEach(u => { const isChecked = g.members && g.members.includes(u.email) ? 'checked' : ''; usersHtml += `<label style="display:block; font-size:12px; margin:3px 0; color:var(--text-main);"><input type="checkbox" ${isChecked} onchange="toggleMember('${g.id}', '${u.email}')"> ${u.email}</label>`; }); card.innerHTML = ` <div style="display:flex; justify-between; align-items:center; margin-bottom: 8px;"> <strong style="color:var(--text-main); font-size: 14px;">👥 ${g.name}</strong> <button style="background:#a93226; color:white; border:none; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" onclick="deleteGroup('${g.id}')">Elimina</button> </div> <div style="max-height: 100px; overflow-y:auto; border-top:1px solid var(--border-color); padding-top:5px;"> ${usersHtml} </div>`; container.appendChild(card); }); }
 
         function getRecursiveNoteCount(folderId) {
             let count = allNotes.filter(n => n.parent_id === folderId).length;
@@ -583,7 +620,7 @@
             const tagSelect = document.getElementById('tagSelect');
             if (!tagSelect) return;
             const currentVal = tagSelect.value;
-            tagSelect.innerHTML = '<option value="">🏷️ Filtra per Tag...</option>';
+            tagSelect.innerHTML = '<option value="">🏷️ Tutti i Tag</option>';
             const scopeVal = document.getElementById('scopeSelect') ? document.getElementById('scopeSelect').value : 'current';
             const folderNotes = (scopeVal === 'all') ? allNotes : allNotes.filter(n => n.parent_id === currentFolderId);
             const uniqueTags = new Set();
@@ -641,13 +678,11 @@
         function cmPrint() {
             if (currentNoteId !== ctxNote.id) {
                 currentNoteId = ctxNote.id;
-                
                 if (currentFolderId !== ctxNote.parent_id) {
                     currentFolderId = ctxNote.parent_id;
                     expandFolderAndParents(currentFolderId);
                     renderFolderTree();
                 }
-
                 document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
                 renderContent(ctxNote);
                 updateNoteList(); 
@@ -695,7 +730,7 @@
             container.innerHTML = '';
             if (filtered.length === 0) {
                 const emptyMsg = scopeVal === 'current' && !currentFolderId ? 'Seleziona un taccuino per iniziare...' : 'Nessuna nota trovata';
-                container.innerHTML = `<div style="padding:15px; color:#888;">${emptyMsg}</div>`; 
+                container.innerHTML = `<div style="padding:15px; color:var(--text-muted);">${emptyMsg}</div>`; 
                 return;
             }
 
@@ -711,7 +746,7 @@
 
                 let tagsBadge = '';
                 if (note.tags && note.tags.length > 0) {
-                    tagsBadge = note.tags.map(t => `<span style="font-size:10px; background:#3a3f45; color:#aaa; padding:1px 4px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
+                    tagsBadge = note.tags.map(t => `<span style="font-size:10px; background:var(--bg-sidebar); color:var(--text-muted); padding:1px 4px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
                 }
 
                 div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong>${note.title}</strong><div>${tagsBadge}</div></div>`;
@@ -741,12 +776,21 @@
             });
         }
 
+        function toggleTOC() {
+            const menu = document.getElementById('toc-menu');
+            menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+        }
+
         function renderContent(note) {
             const editorContent = document.getElementById('editor-content');
-            let cleanBody = note.body.replace(/:\/([a-zA-Z0-9]{32})(?:\C+[a-zA-Z0-9]+)?/g, '/api/resource/$1');
+            
+            // CORREZIONE BUG REGEX RISORSE JOPLIN
+            let cleanBody = note.body.replace(/:\/([a-zA-Z0-9]{32})(?:\.([a-zA-Z0-9]+))?/g, '/api/resource/$1');
             let htmlContent = marked.parse(cleanBody);
-            editorContent.innerHTML = `<h1>${note.title}</h1><div>${htmlContent}</div>`;
+            
+            editorContent.innerHTML = `<h1>${note.title}</h1><div id="md-rendered-body">${htmlContent}</div>`;
 
+            // EVENTI IMMAGINI E LINK
             editorContent.querySelectorAll('img').forEach(img => {
                 img.onclick = function() { openLightbox(this.src); };
             });
@@ -755,6 +799,44 @@
                 a.setAttribute('target', '_blank');
                 a.setAttribute('rel', 'noopener noreferrer');
             });
+
+            // GESTIONE BOTTONI COPIA CODICE
+            editorContent.querySelectorAll('pre').forEach(pre => {
+                const btn = document.createElement('button');
+                btn.className = 'code-copy-btn';
+                btn.innerText = '📋 Copia';
+                btn.onclick = () => {
+                    const codeText = pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText;
+                    navigator.clipboard.writeText(codeText).then(() => showToast('Codice copiato!'));
+                };
+                pre.appendChild(btn);
+            });
+
+            // COSTRUZIONE INDICE (TOC)
+            const headings = editorContent.querySelectorAll('h1, h2, h3');
+            const tocBtn = document.getElementById('toc-btn');
+            const tocMenu = document.getElementById('toc-menu');
+            tocMenu.innerHTML = '';
+
+            if (headings.length > 1) {
+                tocBtn.style.display = 'flex';
+                headings.forEach((h, idx) => {
+                    const id = 'heading-' + idx;
+                    h.id = id;
+                    const item = document.createElement('div');
+                    item.style.cssText = 'padding: 4px 0; cursor: pointer; color: var(--text-main);';
+                    if (h.tagName === 'H2') item.style.paddingLeft = '10px';
+                    if (h.tagName === 'H3') item.style.paddingLeft = '20px';
+                    item.innerText = h.innerText;
+                    item.onclick = () => {
+                        document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+                        tocMenu.style.display = 'none';
+                    };
+                    tocMenu.appendChild(item);
+                });
+            } else {
+                tocBtn.style.display = 'none';
+            }
         }
     </script>
 </body>
