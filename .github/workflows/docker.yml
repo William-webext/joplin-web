@@ -27,4 +27,10 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/william-webext/joplin-web:latest
+          # :latest da solo non permette rollback — se una build ha un problema (come quello appena
+          # risolto) non c'è modo di tornare alla precedente senza ricompilare a mano. Il tag con lo
+          # short SHA del commit resta disponibile su GHCR anche dopo che :latest è stato aggiornato:
+          # in caso di problemi basta ripuntare Portainer a ghcr.io/.../joplin-web:<sha> invece di :latest.
+          tags: |
+            ghcr.io/william-webext/joplin-web:latest
+            ghcr.io/william-webext/joplin-web:${{ github.sha }}
