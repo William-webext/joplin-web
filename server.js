@@ -41,6 +41,18 @@ app.use((req, res, next) => {
   next();
 });
 
+// FUNZIONE VERIFICA CREDENZIALI PLUGIN
+async function authenticateRequest(auth) {
+  if (!auth || !auth.email || !auth.password) return false;
+  try {
+    const result = await pool.query('SELECT password FROM users WHERE email = $1', [auth.email]);
+    if (result.rows.length === 0) return false;
+    return await bcrypt.compare(auth.password, result.rows[0].password);
+  } catch (e) {
+    return false;
+  }
+}
+
 app.get('/api/users-and-groups', async (req, res) => {
   try {
     const userRes = await pool.query('SELECT id, email, is_admin FROM users ORDER BY email ASC');
@@ -73,11 +85,17 @@ app.get('/api/published-list', (req, res) => {
   res.json({ folders: list });
 });
 
-app.post('/api/publish', (req, res) => {
-  const { folder, folders, notes, updateOnlyVisibility } = req.body;
-  const targetFolders = folders || (folder ? [folder] : []);
+// API PUBBLICAZIONE CON PROTEZIONE AUTENTICAZIONE
+app.post('/api/publish', async (req, res) => {
+  const { auth, folder, folders, notes, updateOnlyVisibility } = req.body;
 
-  if (targetFolders.length === 0) return res.status(400).json({ error: 'Dati incompleti' });
+  const isAuthenticated = await authenticateRequest(auth);
+  if (!isAuthenticated) {
+    return res.status(401).json({ error: 'Authentication failed. Invalid email or password in plugin settings.' });
+  }
+
+  const targetFolders = folders || (folder ? [folder] : []);
+  if (targetFolders.length === 0) return res.status(400).json({ error: 'Missing folder data' });
 
   const currentData = getPublishedData();
   const folderIds = targetFolders.map(f => f.id);
