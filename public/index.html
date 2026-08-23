@@ -69,6 +69,7 @@
         .note-item.active { background-color: var(--accent-blue) !important; color: white !important; }
         .note-item.active strong { color: white !important; }
 
+        /* EVIDENZIATORI PASTELLO */
         .note-item.hl-yellow { background-color: #fef9c3 !important; color: #1f2328 !important; border-left: 4px solid #ca8a04 !important; }
         .note-item.hl-pink { background-color: #ffe4e6 !important; color: #1f2328 !important; border-left: 4px solid #e11d48 !important; }
         .note-item.hl-green { background-color: #dcfce7 !important; color: #1f2328 !important; border-left: 4px solid #16a34a !important; }
@@ -282,13 +283,21 @@
             blue: '🔵 ',
             orange: '🟠 '
         };
-        const ALL_EMOJIS = ['🟡 ', '🔴 ', '🟢 ', '🔵 ', '🟠 '];
+        const ALL_EMOJIS = ['🟡 ', '🔴 ', '🟢 ', '🔵 ', '🟠 ', '🟡', '🔴', '🟢', '🔵', '🟠'];
 
-        function getNoteDisplayTitle(note, highlightedNotesMap) {
-            let cleanTitle = note.title || '';
+        // Estrae il titolo pulito privo di emoji per ordinamento e ricerche
+        function getCleanTitle(title) {
+            let clean = title || '';
             ALL_EMOJIS.forEach(e => {
-                if (cleanTitle.startsWith(e)) cleanTitle = cleanTitle.substring(e.length);
+                if (clean.startsWith(e)) clean = clean.substring(e.length);
+                if (clean.endsWith(e)) clean = clean.substring(0, clean.length - e.length);
             });
+            return clean.trim();
+        }
+
+        // Restituisce il titolo con l'emoji all'INIZIO per la visualizzazione
+        function getNoteDisplayTitle(note, highlightedNotesMap) {
+            let cleanTitle = getCleanTitle(note.title);
             const activeColor = highlightedNotesMap ? highlightedNotesMap[note.id] : null;
             const emoji = (activeColor && COLOR_EMOJIS[activeColor]) ? COLOR_EMOJIS[activeColor] : '';
             return `${emoji}${cleanTitle}`;
@@ -905,19 +914,23 @@
             if (query) {
                 filtered = filtered.filter(n => {
                     const displayTitle = getNoteDisplayTitle(n, highlightedNotes);
+                    const cleanTitle = getCleanTitle(n.title);
                     return (displayTitle && displayTitle.toLowerCase().includes(query)) || 
+                           (cleanTitle && cleanTitle.toLowerCase().includes(query)) ||
                            (n.body && n.body.toLowerCase().includes(query)) || 
                            (n.tags && n.tags.some(t => t.toLowerCase().includes(query)));
                 });
             }
 
+            // ORDINAMENTO ALFABETICO SUL TITOLO PULITO (IGNORA L'EMOJI ALL'INIZIO)
             filtered.sort((a, b) => {
-                const titleA = getNoteDisplayTitle(a, highlightedNotes);
-                const titleB = getNoteDisplayTitle(b, highlightedNotes);
+                const titleA = getCleanTitle(a.title);
+                const titleB = getCleanTitle(b.title);
+
                 if (sortVal === 'updated_desc') return (b.updated_time || 0) - (a.updated_time || 0);
                 if (sortVal === 'updated_asc') return (a.updated_time || 0) - (b.updated_time || 0);
-                if (sortVal === 'title_asc') return titleA.localeCompare(titleB);
-                if (sortVal === 'title_desc') return titleB.localeCompare(titleA);
+                if (sortVal === 'title_asc') return titleA.localeCompare(titleB, undefined, { sensitivity: 'base', numeric: true });
+                if (sortVal === 'title_desc') return titleB.localeCompare(titleA, undefined, { sensitivity: 'base', numeric: true });
                 return 0;
             });
 
