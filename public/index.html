@@ -1,445 +1,338 @@
-<!DOCTYPE html>
-<html lang="it">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Joplin Web Portal</title>
-    <link rel="manifest" href="/manifest.json">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <style>
-        :root {
-            --bg-sidebar: #22262b;
-            --bg-notelist: #2a2e33;
-            --bg-editor: #1e1e1e;
-            --text-main: #d4d4d4;
-            --text-muted: #8e9297;
-            --accent-blue: #0e639c;
-            --hover-bg: #353b42;
-            --border-color: #3a3f45;
-        }
+import joplin from 'api';
+import { MenuItemLocation, SettingItemType } from 'api/types';
 
-        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; height: 100vh; background-color: var(--bg-editor); color: var(--text-main); overflow: hidden; }
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+joplin.plugins.register({
+	onStart: async () => {
+		await joplin.settings.registerSection('webPublisherSection', {
+			label: 'Web Publisher',
+			iconName: 'fas fa-globe',
+		});
 
-        #sidebar { width: 240px; background-color: var(--bg-sidebar); display: flex; flex-direction: column; flex-shrink: 0; }
-        #notes-list { width: 320px; background-color: var(--bg-notelist); display: flex; flex-direction: column; flex-shrink: 0; border-left: 1px solid var(--border-color); }
-        #editor { flex-grow: 1; padding: 0; overflow-y: auto; background-color: var(--bg-editor); font-size: 15px; line-height: 1.6; min-width: 300px; display: flex; flex-direction: column; }
-        
-        .resizer { width: 4px; background-color: var(--border-color); cursor: col-resize; flex-shrink: 0; z-index: 10; }
-        .resizer:hover, .resizer.active { background-color: var(--accent-blue); }
+		await joplin.settings.registerSettings({
+			'serverUrl': {
+				value: 'https://webnote.beerfactory.pt',
+				type: SettingItemType.String,
+				section: 'webPublisherSection',
+				public: true,
+				label: 'Web Server URL',
+			},
+		});
 
-        .header { padding: 12px 15px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
-        .list-container { overflow-y: auto; flex-grow: 1; }
-        
-        .folder-item { cursor: pointer; font-size: 13px; color: #ccc; }
-        .folder-title { padding: 6px 15px; display: flex; align-items: center; }
-        .folder-title:hover { background-color: var(--hover-bg); }
-        .folder-title.active { background-color: var(--accent-blue); color: white; }
-        .children-container { border-left: 1px solid #444; margin-left: 20px; }
-        .toggle-arrow { display: inline-block; width: 20px; padding: 5px 0; font-size: 10px; color: var(--text-muted); transition: transform 0.2s; text-align: center; }
-        .toggle-arrow.open { transform: rotate(90deg); }
+		const dialogs = joplin.views.dialogs;
+		const dialogHandle = await dialogs.create('publishDialog');
 
-        .sidebar-actions { padding: 10px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 5px; background-color: var(--bg-sidebar); }
-        .action-btn { width: 100%; padding: 8px; background: var(--bg-notelist); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; cursor: pointer; font-size: 12px; text-align: center; }
-        .action-btn:hover { background: var(--hover-bg); }
+		let panelHandle: string | null = null;
+		let isPanelVisible = false;
 
-        .note-item { padding: 12px 15px; cursor: pointer; border-bottom: 1px solid var(--border-color); font-size: 14px; }
-        .note-item:hover { background-color: var(--hover-bg); }
-        .note-item.active { background-color: var(--accent-blue); color: white; }
-        
-        .search-bar { margin: 10px; padding: 6px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); border-radius: 4px; color: white; font-size: 13px; }
+		const showMessage = async (htmlContent: string) => {
+			await dialogs.setHtml(dialogHandle, `<div style="padding: 10px; line-height: 1.5; font-size: 13px;">${htmlContent}</div>`);
+			await dialogs.setButtons(dialogHandle, [{ id: 'ok', title: 'OK' }]);
+			await dialogs.open(dialogHandle);
+		};
 
-        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 2000; }
-        .modal-card { background: var(--bg-sidebar); padding: 25px; border-radius: 8px; width: 450px; border: 1px solid var(--border-color); max-height: 80vh; overflow-y: auto; }
-        input.login-input { padding: 10px; margin: 8px 0; font-size: 14px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-notelist); color: white; width: 100%; box-sizing: border-box; }
+		// Funzione per recuperare ricorsivamente tutti i sotto-taccuini
+		const getFolderTree = async (folderId: string): Promise<any[]> => {
+			const folders = [];
+			const queue = [folderId];
 
-        #editor-content { padding: 40px; max-width: 900px; margin: 0 auto; width: 100%; box-sizing: border-box; }
-        #editor h1 { font-size: 1.8em; margin-bottom: 0.5em; color: white; }
-        #editor h2, #editor h3 { color: #569cd6; border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 30px; }
-        #editor a { color: #569cd6; text-decoration: none; }
+			while (queue.length > 0) {
+				const currentId = queue.shift()!;
+				try {
+					const f = await joplin.data.get(['folders', currentId], { fields: ['id', 'title', 'parent_id'] });
+					folders.push(f);
+					
+					let page = 1;
+					let hasMore = true;
+					while (hasMore) {
+						const res = await joplin.data.get(['folders', currentId, 'folders'], { fields: ['id'], page: page++ });
+						res.items.forEach((child: any) => queue.push(child.id));
+						hasMore = res.has_more;
+					}
+				} catch (e) {
+					console.error("Error fetching folder details", e);
+				}
+			}
+			return folders;
+		};
 
-        /* =========================================
-           OTTIMIZZAZIONE MOBILE (SMARTPHONE)
-           ========================================= */
-        .mobile-back-btn { 
-            display: none; 
-            background: #1a1c1f; 
-            color: #569cd6; 
-            border: none; 
-            border-bottom: 1px solid var(--border-color); 
-            padding: 15px; 
-            font-size: 14px; 
-            font-weight: bold; 
-            cursor: pointer; 
-            text-align: left; 
-            width: 100%; 
-            flex-shrink: 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2); 
-        }
+		const renderPanelContent = async () => {
+			if (!panelHandle) return;
+			const savedUrl = await joplin.settings.value('serverUrl');
+			const serverUrl = savedUrl.trim().replace(/\/$/, '');
 
-        @media (max-width: 768px) {
-            .resizer { display: none !important; }
-            
-            /* Nasconde tutto di default su Mobile */
-            #sidebar, #notes-list, #editor { 
-                width: 100% !important; 
-                min-width: 100% !important; 
-                height: 100vh !important; 
-                display: none !important; 
-            }
+			let publishedFolders: any[] = [];
+			try {
+				const response = await fetch(`${serverUrl}/api/published-list`);
+				const data = await response.json();
+				publishedFolders = data.folders || [];
+			} catch (err: any) {}
 
-            /* Logica di attivazione Pannelli */
-            body.view-sidebar #sidebar { display: flex !important; }
-            body.view-notes #notes-list { display: flex !important; }
-            body.view-editor #editor { display: flex !important; }
+			let itemsHtml = '';
+			if (publishedFolders.length === 0) {
+				itemsHtml = `<div style="padding: 20px; text-align: center; font-size: 12px; opacity: 0.7;">ℹ️ No published notebooks found.</div>`;
+			} else {
+				publishedFolders.forEach((f) => {
+					let visBadge = '🌍 Public';
+					if (f.visibility === 'private') visBadge = '🔒 Registered';
+					if (f.visibility === 'custom') visBadge = '🎯 Custom';
 
-            .mobile-back-btn { display: block; }
-            
-            /* Adattamenti grafici interni per il mobile */
-            .modal-card { width: 90% !important; padding: 15px !important; }
-            #editor-content { padding: 20px !important; }
-            #editor h1 { font-size: 1.5em !important; }
-        }
-    </style>
-</head>
-<body class="view-sidebar">
+					itemsHtml += `
+						<div style="background: var(--joplin-background-color-2, #2a2e33); border: 1px solid var(--joplin-divider-color, #3a3f45); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+							<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:13px;">
+								<strong>📁 ${f.title}</strong>
+								<span style="font-size:10px; background:#0e639c; color:white; padding:2px 5px; border-radius:3px; font-weight:bold;">${visBadge}</span>
+							</div>
+							<div style="font-size:11px; opacity:0.7; margin-bottom:10px;">Web Notes: <b>${f.notesCount}</b></div>
+							<div style="display:flex; gap:6px;">
+								<button style="flex:1; padding:6px; background:#0e639c; color:white; border:none; border-radius:4px; font-weight:600; cursor:pointer; font-size:11px;" onclick="webviewApi.postMessage({ action: 'editPublish', folderId: '${f.id}' })">⚙️ Edit Access</button>
+								<button style="flex:1; padding:6px; background:#a93226; color:white; border:none; border-radius:4px; font-weight:600; cursor:pointer; font-size:11px;" onclick="webviewApi.postMessage({ action: 'removePublish', folderId: '${f.id}' })">🗑️ Unpublish</button>
+							</div>
+						</div>
+					`;
+				});
+			}
 
-    <!-- MODALE LOGIN -->
-    <div id="login-modal" class="modal-overlay">
-        <div class="modal-card" style="width: 320px;">
-            <form onsubmit="event.preventDefault(); performLogin();">
-                <h3 style="margin-top:0; color:white;">Accedi al Portale</h3>
-                <input type="email" id="emailInput" class="login-input" placeholder="Email" required>
-                <input type="password" id="passwordInput" class="login-input" placeholder="Password" required>
-                <button type="submit" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 10px;">Accedi</button>
-                <button type="button" class="action-btn" style="margin-top:5px;" onclick="closeLoginModal()">Annulla</button>
-            </form>
-        </div>
-    </div>
+			const html = `
+				<div style="padding:12px; color:var(--joplin-color); font-family:sans-serif;">
+					<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #3a3f45; padding-bottom:8px; margin-bottom:12px;">
+						<h3 style="margin:0; font-size:13px; text-transform:uppercase; letter-spacing:0.5px;">🌐 Web Publisher</h3>
+						<button style="cursor:pointer; background:none; border:none; color:var(--joplin-color); font-size:14px;" onclick="webviewApi.postMessage({ action: 'refresh' })" title="Refresh list">🔄</button>
+					</div>
+					${itemsHtml}
+				</div>
+			`;
+			await joplin.views.panels.setHtml(panelHandle, html);
+		};
 
-    <!-- MODALE GESTIONE GRUPPI (ADMIN) -->
-    <div id="groups-modal" class="modal-overlay">
-        <div class="modal-card">
-            <h3 style="margin-top:0; color:white;">⚙️ Gestione Gruppi Utenti</h3>
-            <div id="groups-container-list"></div>
-            <hr style="border-color: var(--border-color); margin: 15px 0;">
-            <h4 style="color:white; margin-bottom: 5px;">Crea Nuovo Gruppo</h4>
-            <input type="text" id="newGroupName" class="login-input" placeholder="Nome Gruppo (es. Reparto Tecnico)">
-            <button class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="createNewGroup()">+ Crea Gruppo</button>
-            <button class="action-btn" style="margin-top: 15px;" onclick="closeGroupsModal()">Chiudi e Salva</button>
-        </div>
-    </div>
+		const initPanelIfNeeded = async () => {
+			if (!panelHandle) {
+				panelHandle = await joplin.views.panels.create('webPublisherPanel');
+				joplin.views.panels.onMessage(panelHandle, async (msg: any) => {
+					const savedUrl = await joplin.settings.value('serverUrl');
+					const serverUrl = savedUrl.trim().replace(/\/$/, '');
+					
+					if (msg.action === 'editPublish') {
+						await joplin.commands.execute('publishNotebookToWeb', msg.folderId);
+					} else if (msg.action === 'removePublish') {
+						// Recupera l'albero intero e lo elimina
+						const tree = await getFolderTree(msg.folderId);
+						const foldersPayload = tree.map(f => ({ id: f.id, visibility: 'remove' }));
+						
+						await fetch(`${serverUrl}/api/publish`, {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ folders: foldersPayload }),
+						});
+						await renderPanelContent();
+					} else if (msg.action === 'refresh') {
+						await renderPanelContent();
+					}
+				});
+			}
+		};
 
-    <div id="sidebar">
-        <div class="header">
-            <span>📓 Taccuini</span>
-            <span id="auth-status" style="font-size:10px; color:#569cd6;"></span>
-        </div>
-        <div id="folders-container" class="list-container"></div>
-        <div class="sidebar-actions">
-            <button class="action-btn" onclick="fetchDataFromServer()">🔄 Aggiorna</button>
-            <button id="admin-btn" class="action-btn" style="display:none; background:#2d3238;" onclick="openGroupsModal()">⚙️ Gruppi</button>
-            <button id="auth-btn" class="action-btn" onclick="handleAuthClick()">🔑 Accedi</button>
-        </div>
-    </div>
-    
-    <div class="resizer" id="resizer-1"></div>
+		await joplin.commands.register({
+			name: 'toggleWebPublisherPanel',
+			label: '🌐 Toggle Web Publisher Panel',
+			iconName: 'fas fa-globe',
+			execute: async () => {
+				await initPanelIfNeeded();
+				isPanelVisible = !isPanelVisible;
+				if (panelHandle) {
+					await joplin.views.panels.show(panelHandle, isPanelVisible);
+					if (isPanelVisible) await renderPanelContent();
+				}
+			},
+		});
 
-    <div id="notes-list">
-        <!-- Bottone Indietro Mobile -->
-        <button class="mobile-back-btn" onclick="showPanel('sidebar')">🔙 Taccuini</button>
-        
-        <div style="display: flex; flex-direction: column; border-bottom: 1px solid var(--border-color); padding-top: 10px;">
-            <input type="text" id="searchInput" class="search-bar" style="margin-top: 0;" placeholder="Cerca titolo o testo..." onkeyup="updateNoteList()">
-        </div>
-        <div id="notes-container" class="list-container">
-            <div style="padding:15px; color:#888; font-size: 13px;">Seleziona un taccuino...</div>
-        </div>
-    </div>
+		// MAIN PUBLISH COMMAND (RECURSIVE)
+		await joplin.commands.register({
+			name: 'publishNotebookToWeb',
+			label: '🌐 Publish / Update / Remove from Web',
+			iconName: 'fas fa-globe',
+			execute: async (folderId?: string) => {
+				let targetFolderId = folderId;
+				if (!targetFolderId) {
+					const selectedFolder = await joplin.workspace.selectedFolder();
+					if (selectedFolder) targetFolderId = selectedFolder.id;
+				}
 
-    <div class="resizer" id="resizer-2"></div>
+				if (!targetFolderId) return await showMessage('⚠️ Please select a notebook first.');
 
-    <div id="editor">
-        <!-- Bottone Indietro Mobile -->
-        <button class="mobile-back-btn" onclick="showPanel('notes')">🔙 Note</button>
-        
-        <div id="editor-content">
-            <div style="color: #888; text-align: center; margin-top: 20vh; font-size: 18px;">Seleziona una nota per la lettura</div>
-        </div>
-    </div>
+				const savedUrl = await joplin.settings.value('serverUrl');
+				const serverUrl = savedUrl.trim().replace(/\/$/, '');
 
-    <script>
-        let allFolders = [];
-        let allNotes = [];
-        let systemUsers = [];
-        let systemGroups = [];
-        let currentFolderId = null;
-        let loggedUserId = localStorage.getItem('joplin_user_id');
-        let isAdmin = localStorage.getItem('joplin_is_admin') === 'true';
+				// Ottieni l'albero di tutti i sotto-taccuini
+				const targetFolders = await getFolderTree(targetFolderId);
+				if (targetFolders.length === 0) return await showMessage('⚠️ Error reading folder data.');
+				const rootFolder = targetFolders[0];
 
-        window.onload = function() {
-            updateAuthUI();
-            fetchDataFromServer();
-        };
+				let users: any[] = [];
+				let groups: any[] = [];
+				let publishedList: any[] = [];
+				try {
+					const ugRes = await fetch(`${serverUrl}/api/users-and-groups`);
+					const ugData = await ugRes.json();
+					users = ugData.users || [];
+					groups = ugData.groups || [];
 
-        // GESTIONE VISUALIZZAZIONE MOBILE (PANNELLI SCORREVOLI)
-        function showPanel(panelName) {
-            document.body.className = 'view-' + panelName;
-        }
+					const pubRes = await fetch(`${serverUrl}/api/published-list`);
+					const pubData = await pubRes.json();
+					publishedList = pubData.folders || [];
+				} catch (e) {}
 
-        function updateAuthUI() {
-            const authBtn = document.getElementById('auth-btn');
-            const adminBtn = document.getElementById('admin-btn');
-            const authStatus = document.getElementById('auth-status');
+				const currentPub = publishedList.find(p => p.id === targetFolderId);
+				let currentVis = currentPub ? currentPub.visibility : 'public';
+				let currentAllowedUsers: string[] = currentPub ? (currentPub.allowedUsers || []) : [];
+				let currentAllowedGroups: string[] = currentPub ? (currentPub.allowedGroups || []) : [];
 
-            if (loggedUserId) {
-                authBtn.innerText = '🚪 Esci';
-                authStatus.innerText = '🔓 Autenticato';
-                adminBtn.style.display = isAdmin ? 'block' : 'none';
-            } else {
-                authBtn.innerText = '🔑 Accedi';
-                authStatus.innerText = '🌍 Pubblico';
-                adminBtn.style.display = 'none';
-            }
-        }
+				while (true) {
+					let usersCheckboxes = users.map(u => {
+						const isChecked = currentAllowedUsers.includes(u.email) ? 'checked' : '';
+						return `<label class="check-item"><input type="checkbox" name="user_${u.email}" value="${u.email}" ${isChecked}><span title="${u.email}">${u.email}</span></label>`;
+					}).join('');
 
-        function handleAuthClick() {
-            if (loggedUserId) {
-                localStorage.removeItem('joplin_user_id');
-                localStorage.removeItem('joplin_is_admin');
-                loggedUserId = null;
-                isAdmin = false;
-                updateAuthUI();
-                fetchDataFromServer();
-            } else {
-                document.getElementById('login-modal').style.display = 'flex';
-            }
-        }
+					let groupsCheckboxes = groups.map(g => {
+						const isChecked = currentAllowedGroups.includes(g.id) ? 'checked' : '';
+						return `<label class="check-item"><input type="checkbox" name="group_${g.id}" value="${g.id}" ${isChecked}><span title="${g.name}">👥 ${g.name}</span></label>`;
+					}).join('');
 
-        function closeLoginModal() { document.getElementById('login-modal').style.display = 'none'; }
+					const isCustomShow = currentVis === 'custom' ? 'block' : 'none';
 
-        async function performLogin() {
-            const email = document.getElementById('emailInput').value.trim();
-            const password = document.getElementById('passwordInput').value.trim();
+					await dialogs.setHtml(dialogHandle, `
+						<style>
+							.pub-form { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; line-height: 1.4; color: var(--joplin-color, #d4d4d4); width: 100%; box-sizing: border-box; }
+							.pub-form select { width: 100%; box-sizing: border-box; padding: 7px; font-size: 13px; border-radius: 4px; background: var(--joplin-background-color-2, #2a2e33); color: var(--joplin-color, #fff); border: 1px solid #3a3f45; outline: none; }
+							.pub-desc { font-size: 11px; opacity: 0.7; margin-top: 5px; }
+							.custom-box { border: 1px solid #3a3f45; border-radius: 6px; padding: 10px; background: #16181b; margin-top: 10px; }
+							.list-box { max-height: 110px; overflow-y: auto; overflow-x: hidden; background: #0f1113; padding: 6px; border-radius: 4px; border: 1px solid #2a2e33; margin-top: 4px; }
+							.check-item { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 12px; white-space: nowrap; overflow: hidden; }
+							.check-item input { flex-shrink: 0; cursor: pointer; }
+							.check-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+						</style>
+						<div class="pub-form">
+							<h3 style="margin-top:0; font-size:15px;">Publish Notebook: "${rootFolder.title}"</h3>
+							<form name="publishForm">
+								<div style="margin-bottom: 10px;">
+									<label style="display:block; font-weight:bold; margin-bottom:4px;">Visibility Level:</label>
+									<select name="visibility" onchange="
+										const desc = document.getElementById('visDesc');
+										const box = document.getElementById('customOptionsBox');
+										box.style.display = (this.value === 'custom' ? 'block' : 'none');
+										if(this.value === 'public') desc.innerText = '🌍 Visible to anyone on the web without login.';
+										else if(this.value === 'private') desc.innerText = '🔒 Visible to all authenticated registered users.';
+										else if(this.value === 'custom') desc.innerText = '🎯 Restricted to selected groups and users below.';
+										else if(this.value === 'remove') desc.innerText = '🗑️ Delete this notebook and its sub-notebooks from the web server.';
+									">
+										<option value="public" ${currentVis === 'public' ? 'selected' : ''}>🌍 Public</option>
+										<option value="private" ${currentVis === 'private' ? 'selected' : ''}>🔒 Registered Users</option>
+										<option value="custom" ${currentVis === 'custom' ? 'selected' : ''}>🎯 Custom Access</option>
+										<option value="remove">🗑️ Unpublish</option>
+									</select>
+									<div id="visDesc" class="pub-desc">
+										${currentVis === 'public' ? '🌍 Visible to anyone on the web without login.' : ''}
+										${currentVis === 'private' ? '🔒 Visible to all authenticated registered users.' : ''}
+										${currentVis === 'custom' ? '🎯 Restricted to selected groups and users below.' : ''}
+									</div>
+								</div>
 
-            try {
-                const res = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
-                });
-                const data = await res.json();
-                if(!res.ok) return alert('Errore: ' + data.error);
+								<div id="customOptionsBox" class="custom-box" style="display: ${isCustomShow};">
+									<div style="margin-bottom: 10px;">
+										<strong style="font-size:11px; color:#569cd6; text-transform:uppercase;">Authorized Groups:</strong>
+										<div class="list-box">${groupsCheckboxes || '<span style="font-size:11px; opacity:0.5;">No groups available</span>'}</div>
+									</div>
+									<div>
+										<strong style="font-size:11px; color:#569cd6; text-transform:uppercase;">Authorized Specific Users:</strong>
+										<div class="list-box">${usersCheckboxes || '<span style="font-size:11px; opacity:0.5;">No users available</span>'}</div>
+									</div>
+								</div>
+							</form>
+						</div>
+					`);
 
-                localStorage.setItem('joplin_user_id', data.userId);
-                localStorage.setItem('joplin_is_admin', data.isAdmin);
-                loggedUserId = data.userId;
-                isAdmin = data.isAdmin;
-                closeLoginModal();
-                updateAuthUI();
-                fetchDataFromServer();
-            } catch(e) { alert('Errore connessione'); }
-        }
+					await dialogs.setButtons(dialogHandle, [{ id: 'ok', title: 'Confirm' }, { id: 'cancel', title: 'Cancel' }]);
 
-        async function fetchDataFromServer() {
-            try {
-                const url = loggedUserId ? `/api/data?userId=${loggedUserId}` : '/api/data';
-                const res = await fetch(url);
-                const data = await res.json();
+					const result = await dialogs.open(dialogHandle);
+					if (result.id === 'cancel') return;
 
-                allFolders = data.folders || [];
-                allNotes = data.notes || [];
+					const formData = result.formData ? result.formData.publishForm : null;
+					if (!formData) return;
 
-                renderFolderTree();
-                if (currentFolderId) updateNoteList();
-            } catch(e) {}
-        }
+					const visibility = formData.visibility;
+					const allowedUsers: string[] = [];
+					const allowedGroups: string[] = [];
 
-        // GESTIONE GRUPPI ADMIN
-        async function openGroupsModal() {
-            const res = await fetch('/api/users-and-groups');
-            const data = await res.json();
-            systemUsers = data.users || [];
-            systemGroups = data.groups || [];
-            renderGroupsList();
-            document.getElementById('groups-modal').style.display = 'flex';
-        }
+					if (visibility === 'custom') {
+						users.forEach(u => { if (formData[`user_${u.email}`]) allowedUsers.push(u.email); });
+						groups.forEach(g => { if (formData[`group_${g.id}`]) allowedGroups.push(g.id); });
 
-        function closeGroupsModal() {
-            saveGroupsToServer();
-            document.getElementById('groups-modal').style.display = 'none';
-        }
+						if (allowedUsers.length === 0 && allowedGroups.length === 0) {
+							currentVis = 'custom';
+							currentAllowedUsers = [];
+							currentAllowedGroups = [];
+							await showMessage('⚠️ Please select at least one authorized group or user for Custom Access.');
+							continue;
+						}
+					}
 
-        async function saveGroupsToServer() {
-            await fetch('/api/admin/groups', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ groups: systemGroups })
-            });
-        }
+					try {
+						let allNotes: any[] = [];
+						if (visibility !== 'remove') {
+							// Raccoglie tutte le note di TUTTI i sotto-taccuini
+							for (const tf of targetFolders) {
+								let page = 1;
+								let hasMore = true;
+								while (hasMore) {
+									const response = await joplin.data.get(['folders', tf.id, 'notes'], {
+										fields: ['id', 'parent_id', 'title', 'body', 'updated_time', 'user_updated_time'],
+										page: page++,
+									});
+									allNotes.push(...response.items);
+									hasMore = response.has_more;
+								}
+							}
+						}
 
-        function createNewGroup() {
-            const nameInput = document.getElementById('newGroupName');
-            const name = nameInput.value.trim();
-            if (!name) return alert('Inserisci un nome per il gruppo');
-            const newGroup = { id: 'grp_' + Date.now(), name: name, members: [] };
-            systemGroups.push(newGroup);
-            nameInput.value = '';
-            renderGroupsList();
-        }
+						// Prepara l'array di taccuini da inviare al server
+						const foldersPayload = targetFolders.map(tf => ({
+							id: tf.id,
+							title: tf.title,
+							visibility: visibility,
+							allowedUsers,
+							allowedGroups
+						}));
 
-        function deleteGroup(groupId) {
-            systemGroups = systemGroups.filter(g => g.id !== groupId);
-            renderGroupsList();
-        }
+						const payload = {
+							folders: foldersPayload,
+							notes: allNotes,
+						};
 
-        function toggleMember(groupId, email) {
-            const group = systemGroups.find(g => g.id === groupId);
-            if (!group) return;
-            if (!group.members) group.members = [];
-            if (group.members.includes(email)) {
-                group.members = group.members.filter(m => m !== email);
-            } else {
-                group.members.push(email);
-            }
-        }
+						const apiResponse = await fetch(`${serverUrl}/api/publish`, {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify(payload),
+						});
 
-        function renderGroupsList() {
-            const container = document.getElementById('groups-container-list');
-            container.innerHTML = '';
+						if (apiResponse.ok) {
+							if (panelHandle && isPanelVisible) await renderPanelContent();
+							const subCountMsg = targetFolders.length > 1 ? `<br><br><i>Included ${targetFolders.length - 1} sub-notebook(s).</i>` : '';
+							await showMessage(visibility === 'remove' 
+								? `🗑️ Publication removed.${subCountMsg}` 
+								: `✅ Notebook <b>"${rootFolder.title}"</b> published successfully!${subCountMsg}`);
+						} else {
+							await showMessage(`❌ Operation failed.`);
+						}
 
-            if (systemGroups.length === 0) {
-                container.innerHTML = '<div style="color:#888; font-size:13px;">Nessun gruppo creato.</div>';
-                return;
-            }
+					} catch (error: any) {
+						await showMessage(`❌ Error: ${error.message}`);
+					}
 
-            systemGroups.forEach(g => {
-                const card = document.createElement('div');
-                card.style.cssText = 'background: #2a2e33; padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid #3a3f45;';
-                
-                let usersHtml = '';
-                systemUsers.forEach(u => {
-                    const isChecked = g.members && g.members.includes(u.email) ? 'checked' : '';
-                    usersHtml += `<label style="display:block; font-size:12px; margin:3px 0; color:#ccc;"><input type="checkbox" ${isChecked} onchange="toggleMember('${g.id}', '${u.email}')"> ${u.email}</label>`;
-                });
+					break;
+				}
+			},
+		});
 
-                card.innerHTML = `
-                    <div style="display:flex; justify-between; align-items:center; margin-bottom: 8px;">
-                        <strong style="color:white; font-size: 14px;">👥 ${g.name}</strong>
-                        <button style="background:#a93226; color:white; border:none; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" onclick="deleteGroup('${g.id}')">Elimina</button>
-                    </div>
-                    <div style="max-height: 100px; overflow-y:auto; border-top:1px solid #3a3f45; padding-top:5px;">
-                        ${usersHtml}
-                    </div>
-                `;
-                container.appendChild(card);
-            });
-        }
-
-        // RENDERING RICORSIVO ALBERO TACCUINI
-        function renderFolderTree() {
-            const container = document.getElementById('folders-container');
-            container.innerHTML = '';
-
-            const folderMap = {};
-            allFolders.forEach(f => folderMap[f.id] = { ...f, children: [] });
-            const rootFolders = [];
-
-            allFolders.forEach(f => {
-                if (f.parent_id && folderMap[f.parent_id]) {
-                    folderMap[f.parent_id].children.push(folderMap[f.id]);
-                } else {
-                    rootFolders.push(folderMap[f.id]);
-                }
-            });
-
-            rootFolders.sort((a, b) => a.title.localeCompare(b.title));
-
-            function createFolderHTML(folder) {
-                const wrapper = document.createElement('div');
-                wrapper.className = 'folder-item';
-                
-                const titleDiv = document.createElement('div');
-                titleDiv.className = 'folder-title';
-                const hasChildren = folder.children && folder.children.length > 0;
-                
-                const arrow = hasChildren ? `<span class="toggle-arrow">▶</span>` : `<span class="toggle-arrow" style="visibility:hidden;">▶</span>`;
-                const icon = folder.icon ? `<span style="margin-right: 8px;">${folder.icon}</span>` : `<span style="margin-right: 8px;">📁</span>`;
-                titleDiv.innerHTML = `${arrow}${icon}${folder.title}`;
-                
-                const childrenContainer = document.createElement('div');
-                childrenContainer.className = 'children-container';
-                childrenContainer.style.display = 'none';
-
-                // SU MOBILE: La freccetta espande l'albero SENZA aprire le note
-                const arrowSpan = titleDiv.querySelector('.toggle-arrow');
-                if (hasChildren && arrowSpan) {
-                    arrowSpan.onclick = (e) => {
-                        e.stopPropagation(); // Evita di far scattare il click dell'intero taccuino
-                        const isClosed = childrenContainer.style.display === 'none';
-                        childrenContainer.style.display = isClosed ? 'block' : 'none';
-                        arrowSpan.classList.toggle('open', isClosed);
-                    };
-                }
-
-                // Cliccare il nome del taccuino lo apre
-                titleDiv.onclick = () => {
-                    document.querySelectorAll('.folder-title').forEach(el => el.classList.remove('active'));
-                    titleDiv.classList.add('active');
-                    currentFolderId = folder.id;
-                    updateNoteList();
-                    
-                    // Su mobile, passa alla vista delle Note
-                    if (window.innerWidth <= 768) showPanel('notes');
-                };
-
-                wrapper.appendChild(titleDiv);
-                if (hasChildren) {
-                    folder.children.forEach(child => childrenContainer.appendChild(createFolderHTML(child)));
-                    wrapper.appendChild(childrenContainer);
-                }
-                return wrapper;
-            }
-
-            rootFolders.forEach(root => container.appendChild(createFolderHTML(root)));
-        }
-
-        function updateNoteList() {
-            const query = document.getElementById('searchInput').value.toLowerCase().trim();
-            const container = document.getElementById('notes-container');
-            let filtered = allNotes.filter(n => n.parent_id === currentFolderId);
-
-            if(query) filtered = filtered.filter(n => n.title.toLowerCase().includes(query) || n.body.toLowerCase().includes(query));
-
-            container.innerHTML = '';
-            if(filtered.length === 0) {
-                container.innerHTML = '<div style="padding:15px; color:#888;">Nessuna nota trovata</div>'; return;
-            }
-
-            filtered.forEach(note => {
-                const div = document.createElement('div');
-                div.className = 'note-item';
-                div.innerHTML = `<strong>${note.title}</strong>`;
-                div.onclick = () => {
-                    document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
-                    div.classList.add('active');
-                    renderContent(note);
-                    
-                    // Su mobile, passa alla vista della singola Nota
-                    if (window.innerWidth <= 768) showPanel('editor');
-                };
-                container.appendChild(div);
-            });
-        }
-
-        function renderContent(note) {
-            const editorContent = document.getElementById('editor-content');
-            let cleanBody = note.body.replace(/:\/([a-zA-Z0-9]{32})(?:\.[a-zA-Z0-9]+)?/g, '/api/resource/$1');
-            let htmlContent = marked.parse(cleanBody);
-            editorContent.innerHTML = `<h1>${note.title}</h1><div>${htmlContent}</div>`;
-        }
-    </script>
-</body>
-</html>
+		await joplin.views.menuItems.create('publishNotebookItem', 'publishNotebookToWeb', MenuItemLocation.FolderContextMenu);
+		await joplin.views.menuItems.create('toggleWebPublisherPanelItem', 'toggleWebPublisherPanel', MenuItemLocation.View);
+	},
+});
