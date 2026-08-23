@@ -286,7 +286,6 @@
                 if (clean.startsWith(e)) clean = clean.substring(e.length);
                 if (clean.endsWith(e)) clean = clean.substring(0, clean.length - e.length);
             });
-            // Rimuove qualsiasi emoji Unicode generica all'inizio o alla fine del testo
             clean = clean.replace(/^[\p{Extended_Pictographic}\s]+/gu, '');
             clean = clean.replace(/[\p{Extended_Pictographic}\s]+$/gu, '');
             return clean.trim();
@@ -611,7 +610,17 @@
                 sessionStorage.removeItem('joplin_user_email'); 
                 sessionStorage.removeItem('joplin_is_admin');
                 sessionStorage.removeItem('joplin_session_token');
-                loggedUserId = null; loggedUserEmail = null; isAdmin = false; sessionToken = null; updateAuthUI(); fetchDataFromServer();
+                loggedUserId = null; loggedUserEmail = null; isAdmin = false; sessionToken = null; 
+
+                // Reset selezione e visualizzazione per tornare alla home page
+                currentNoteId = null;
+                currentFolderId = null;
+                history.replaceState({}, '', window.location.pathname);
+                document.getElementById('editor-content').innerHTML = `<div style="color: var(--text-muted); text-align: center; margin-top: 20vh; font-size: 18px;" data-i18n="select_note_prompt">${t('select_note_prompt')}</div>`;
+                showPanel('sidebar', false);
+
+                updateAuthUI(); 
+                fetchDataFromServer();
                 if (tokenToRevoke) {
                     fetch('/api/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + tokenToRevoke } }).catch(() => {});
                 }
@@ -681,6 +690,10 @@
             const originalText = refreshBtn ? refreshBtn.innerText : '';
             if (refreshBtn) refreshBtn.innerText = t('refreshing');
 
+            const urlParams = new URLSearchParams(window.location.search);
+            const queryNoteId = urlParams.get('note');
+            const noteToRestore = currentNoteId || queryNoteId;
+
             try {
                 await fetchPreferences();
 
@@ -691,20 +704,17 @@
                 allFolders = data.folders || [];
                 allNotes = data.notes || [];
 
-                const urlParams = new URLSearchParams(window.location.search);
-                const queryNoteId = urlParams.get('note');
-                if (queryNoteId) {
-                    const targetNote = allNotes.find(n => n.id === queryNoteId);
+                if (noteToRestore) {
+                    const targetNote = allNotes.find(n => n.id === noteToRestore);
                     if (targetNote) {
                         currentNoteId = targetNote.id;
                         currentFolderId = targetNote.parent_id;
                         expandFolderAndParents(currentFolderId);
                     } else {
-                        if (!loggedUserId) {
+                        currentNoteId = null;
+                        if (queryNoteId && !loggedUserId) {
                             document.getElementById('login-msg').innerHTML = t('login_private_msg');
                             document.getElementById('login-modal').style.display = 'flex';
-                        } else {
-                            showToast(t('note_not_found'), true);
                         }
                     }
                 }
@@ -719,6 +729,8 @@
                 if (currentNoteId) {
                     const openNote = allNotes.find(n => n.id === currentNoteId);
                     if (openNote) { renderContent(openNote); showPanel('editor', true); }
+                } else {
+                    document.getElementById('editor-content').innerHTML = `<div style="color: var(--text-muted); text-align: center; margin-top: 20vh; font-size: 18px;" data-i18n="select_note_prompt">${t('select_note_prompt')}</div>`;
                 }
             } catch(e) {
                 console.error("Data update error:", e);
@@ -1031,12 +1043,13 @@
 
                 let tagsBadge = '';
                 if (note.tags && note.tags.length > 0) {
-                    tagsBadge = note.tags.map(tg => `<span class="tag-badge" style="font-size:10px; background:var(--badge-bg); color:inherit; padding:1px 5px; border-radius:3px; margin-left:4px;">${escapeHtml(tg)}</span>`).join('');
+                    tagsBadge = note.tags.map(tg => `<span class="tag-badge" style="font-size:10px; background:var(--badge-bg); color:inherit; padding:1px 5px; border-radius:3px;">${escapeHtml(tg)}</span>`).join('');
                 }
 
                 const displayTitle = escapeHtml(getNoteDisplayTitle(note));
+                let tagsRow = tagsBadge ? `<div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">${tagsBadge}</div>` : '';
 
-                div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${displayTitle}</strong><div>${tagsBadge}</div></div>`;
+                div.innerHTML = `<div style="display:flex; flex-direction:column;"><strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${displayTitle}</strong>${tagsRow}</div>`;
                 
                 div.onclick = () => {
                     currentNoteId = note.id;
@@ -1052,6 +1065,13 @@
                     div.classList.add('active');
                     renderContent(note);
                     showPanel('editor', true);
+                };
+
+                div.ondblclick = (e) => {
+                    e.stopPropagation();
+                    if (!document.body.classList.contains('zen-mode')) {
+                        document.body.classList.add('zen-mode');
+                    }
                 };
 
                 div.oncontextmenu = (e) => {
