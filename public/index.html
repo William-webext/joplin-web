@@ -69,20 +69,15 @@
         .note-item.active { background-color: var(--accent-blue) !important; color: white !important; }
         .note-item.active strong { color: white !important; }
 
-        /* EVIDENZIATORI - DARK MODE */
-        .note-item.hl-yellow { background-color: #3a3818; color: #ffffff; border-left: 4px solid #ffd700; }
-        .note-item.hl-pink { background-color: #3a1c28; color: #ffffff; border-left: 4px solid #ff7b93; }
-        .note-item.hl-green { background-color: #1c3a24; color: #ffffff; border-left: 4px solid #50c878; }
-        .note-item.hl-blue { background-color: #1c2b3a; color: #ffffff; border-left: 4px solid #4da6ff; }
-        .note-item.hl-orange { background-color: #3a2a1c; color: #ffffff; border-left: 4px solid #ff9f00; }
-
-        /* EVIDENZIATORI - LIGHT MODE (PASTELLO E TESTO LEGGIBILE) */
-        body.light-theme .note-item.hl-yellow { background-color: #fef9c3 !important; color: #1f2328 !important; border-left: 4px solid #ca8a04 !important; }
-        body.light-theme .note-item.hl-pink { background-color: #ffe4e6 !important; color: #1f2328 !important; border-left: 4px solid #e11d48 !important; }
-        body.light-theme .note-item.hl-green { background-color: #dcfce7 !important; color: #1f2328 !important; border-left: 4px solid #16a34a !important; }
-        body.light-theme .note-item.hl-blue { background-color: #e0f2fe !important; color: #1f2328 !important; border-left: 4px solid #0284c7 !important; }
-        body.light-theme .note-item.hl-orange { background-color: #ffedd5 !important; color: #1f2328 !important; border-left: 4px solid #ea580c !important; }
-        body.light-theme .note-item strong { color: inherit; }
+        /* EVIDENZIATORI PASTELLO - APPLICATI A TUTTI I TEMI PER MASSIMA LEGGIBILITÀ */
+        .note-item.hl-yellow { background-color: #fef9c3 !important; color: #1f2328 !important; border-left: 4px solid #ca8a04 !important; }
+        .note-item.hl-pink { background-color: #ffe4e6 !important; color: #1f2328 !important; border-left: 4px solid #e11d48 !important; }
+        .note-item.hl-green { background-color: #dcfce7 !important; color: #1f2328 !important; border-left: 4px solid #16a34a !important; }
+        .note-item.hl-blue { background-color: #e0f2fe !important; color: #1f2328 !important; border-left: 4px solid #0284c7 !important; }
+        .note-item.hl-orange { background-color: #ffedd5 !important; color: #1f2328 !important; border-left: 4px solid #ea580c !important; }
+        
+        .note-item[class*="hl-"] strong { color: #1f2328 !important; }
+        .note-item[class*="hl-"] span.tag-badge { background: rgba(0, 0, 0, 0.12) !important; color: #1f2328 !important; }
         
         .search-grid { display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--border-color); padding: 10px; background-color: var(--bg-sidebar); }
         .search-row { display: flex; gap: 6px; }
@@ -921,7 +916,7 @@
 
                 let tagsBadge = '';
                 if (note.tags && note.tags.length > 0) {
-                    tagsBadge = note.tags.map(t => `<span style="font-size:10px; background:var(--badge-bg); color:inherit; padding:1px 5px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
+                    tagsBadge = note.tags.map(t => `<span class="tag-badge" style="font-size:10px; background:var(--badge-bg); color:inherit; padding:1px 5px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
                 }
 
                 div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${note.title}</strong><div>${tagsBadge}</div></div>`;
