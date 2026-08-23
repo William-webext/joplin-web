@@ -3,33 +3,161 @@ const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
+const Database = require('better-sqlite3');
 
 const app = express();
 app.use(express.static('public'));
 app.use(express.json({ limit: '50mb' })); 
 const port = 3000;
 
+// 1. INIZIALIZZAZIONE STORAGE E DATABASE SQLITE
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const PUBLISHED_DATA_FILE = path.join(DATA_DIR, 'published_notebooks.json');
-const GROUPS_DATA_FILE = path.join(DATA_DIR, 'groups.json');
-const PREFS_DATA_FILE = path.join(DATA_DIR, 'preferences.json');
+const sqliteDb = new Database(path.join(DATA_DIR, 'database.sqlite'));
+sqliteDb.pragma('journal_mode = WAL'); // Attiva modalità WAL per elevate prestazioni in lettura
 
-if (!fs.existsSync(PUBLISHED_DATA_FILE)) fs.writeFileSync(PUBLISHED_DATA_FILE, JSON.stringify({ folders: [], notes: [] }, null, 2));
-if (!fs.existsSync(GROUPS_DATA_FILE)) fs.writeFileSync(GROUPS_DATA_FILE, JSON.stringify([], null, 2));
-if (!fs.existsSync(PREFS_DATA_FILE)) fs.writeFileSync(PREFS_DATA_FILE, JSON.stringify({}, null, 2));
+// Creazione automatica tabelle se non esistono
+sqliteDb.exec(`
+  CREATE TABLE IF NOT EXISTS preferences (
+    user_id TEXT PRIMARY KEY,
+    pinned_folders TEXT,
+    highlighted_notes TEXT
+  );
 
+  CREATE TABLE IF NOT EXISTS groups (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    members TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS published_folders (
+    id TEXT PRIMARY KEY,
+    parent_id TEXT,
+    title TEXT,
+    visibility TEXT,
+    allowed_users TEXT,
+    allowed_groups TEXT,
+    updated_at INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS published_notes (
+    id TEXT PRIMARY KEY,
+    parent_id TEXT,
+    title TEXT,
+    body TEXT,
+    updated_time INTEGER
+  );
+`);
+
+// 2. FUNZIONALITÀ DI HELPER SQLITE (Sostituiscono i vecchi file JSON)
 function getPublishedData() {
-  try { return JSON.parse(fs.readFileSync(PUBLISHED_DATA_FILE, 'utf-8')); } catch (e) { return { folders: [], notes: [] }; }
+  try {
+    const foldersRows = sqliteDb.prepare('SELECT id, parent_id, title, visibility, allowed_users, allowed_groups, updated_at FROM published_folders').all();
+    const notesRows = sqliteDb.prepare('SELECT id, parent_id, title, body, updated_time FROM published_notes').all();
+
+    const folders = foldersRows.map(f => ({
+      id: f.id,
+      parent_id: f.parent_id || '',
+      title: f.title || '',
+      visibility: f.visibility || 'private',
+      allowedUsers: JSON.parse(f.allowed_users || '[]'),
+      allowedGroups: JSON.parse(f.allowed_groups || '[]'),
+      updated_at: Number(f.updated_at || Date.now())
+    }));
+
+    const notes = notesRows.map(n => ({
+      id: n.id,
+      parent_id: n.parent_id || '',
+      title: n.title || '',
+      body: n.body || '',
+      updated_time: Number(n.updated_time || Date.now())
+    }));
+
+    return { folders, notes };
+  } catch (e) {
+    return { folders: [], notes: [] };
+  }
 }
-function savePublishedData(data) { fs.writeFileSync(PUBLISHED_DATA_FILE, JSON.stringify(data, null, 2)); }
+
+function savePublishedData(data) {
+  const deleteFolders = sqliteDb.prepare('DELETE FROM published_folders');
+  const insertFolder = sqliteDb.prepare(`
+    INSERT INTO published_folders (id, parent_id, title, visibility, allowed_users, allowed_groups, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const deleteNotes = sqliteDb.prepare('DELETE FROM published_notes');
+  const insertNote = sqliteDb.prepare(`
+    INSERT INTO published_notes (id, parent_id, title, body, updated_time)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+
+  const transaction = sqliteDb.transaction((pubData) => {
+    deleteFolders.run();
+    if (Array.isArray(pubData.folders)) {
+      for (const f of pubData.folders) {
+        insertFolder.run(
+          f.id,
+          f.parent_id || '',
+          f.title || '',
+          f.visibility || 'private',
+          JSON.stringify(f.allowedUsers || []),
+          JSON.stringify(f.allowedGroups || []),
+          Number(f.updated_at || Date.now())
+        );
+      }
+    }
+
+    deleteNotes.run();
+    if (Array.isArray(pubData.notes)) {
+      for (const n of pubData.notes) {
+        insertNote.run(
+          n.id,
+          n.parent_id || '',
+          n.title || '',
+          n.body || '',
+          Number(n.updated_time || Date.now())
+        );
+      }
+    }
+  });
+
+  transaction(data);
+}
 
 function getGroupsData() {
-  try { return JSON.parse(fs.readFileSync(GROUPS_DATA_FILE, 'utf-8')); } catch (e) { return []; }
+  try {
+    const rows = sqliteDb.prepare('SELECT id, name, members FROM groups').all();
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name || '',
+      members: JSON.parse(r.members || '[]')
+    }));
+  } catch (e) {
+    return [];
+  }
 }
-function saveGroupsData(groups) { fs.writeFileSync(GROUPS_DATA_FILE, JSON.stringify(groups, null, 2)); }
 
+function saveGroupsData(groups) {
+  const deleteStmt = sqliteDb.prepare('DELETE FROM groups');
+  const insertStmt = sqliteDb.prepare('INSERT INTO groups (id, name, members) VALUES (?, ?, ?)');
+
+  const transaction = sqliteDb.transaction((groupList) => {
+    deleteStmt.run();
+    for (const g of groupList) {
+      insertStmt.run(
+        g.id || '',
+        g.name || '',
+        JSON.stringify(g.members || [])
+      );
+    }
+  });
+
+  transaction(groups || []);
+}
+
+// 3. CONNESSIONE POSTGRESQL (JOPLIN CORE)
 const pool = new Pool({
   user: process.env.DB_USER || 'joplinuser',
   host: process.env.DB_HOST || 'db',
@@ -54,19 +182,26 @@ async function authenticateRequest(auth) {
   }
 }
 
-// API PREFERENZE UI (Ora suddivise per Utente)
+// 4. API PREFERENZE UI (SQLITE)
 app.get('/api/preferences', (req, res) => {
   const userId = req.query.userId;
   if (!userId) return res.json({ pinnedFolders: [], highlightedNotes: {} });
   
   try { 
-    let prefs = JSON.parse(fs.readFileSync(PREFS_DATA_FILE, 'utf-8')); 
-    // Fix migrazione se il file aveva il vecchio formato senza userId
-    if (prefs.pinnedFolders || Array.isArray(prefs.highlightedNotes)) prefs = {}; 
+    const stmt = sqliteDb.prepare('SELECT pinned_folders, highlighted_notes FROM preferences WHERE user_id = ?');
+    const row = stmt.get(userId);
     
-    res.json(prefs[userId] || { pinnedFolders: [], highlightedNotes: {} }); 
-  } 
-  catch(e) { res.json({ pinnedFolders: [], highlightedNotes: {} }); }
+    if (row) {
+      res.json({
+        pinnedFolders: JSON.parse(row.pinned_folders || '[]'),
+        highlightedNotes: JSON.parse(row.highlighted_notes || '{}')
+      });
+    } else {
+      res.json({ pinnedFolders: [], highlightedNotes: {} });
+    }
+  } catch(e) { 
+    res.json({ pinnedFolders: [], highlightedNotes: {} }); 
+  }
 });
 
 app.post('/api/preferences', (req, res) => {
@@ -74,18 +209,24 @@ app.post('/api/preferences', (req, res) => {
   if (!userId) return res.status(400).json({ error: 'Nessun utente specificato' });
 
   try {
-    let prefs = {};
-    try { prefs = JSON.parse(fs.readFileSync(PREFS_DATA_FILE, 'utf-8')); } catch(e) {}
-    if (prefs.pinnedFolders || Array.isArray(prefs.highlightedNotes)) prefs = {}; 
+    const stmt = sqliteDb.prepare(`
+      INSERT INTO preferences (user_id, pinned_folders, highlighted_notes)
+      VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        pinned_folders = excluded.pinned_folders,
+        highlighted_notes = excluded.highlighted_notes
+    `);
     
-    prefs[userId] = { 
-      pinnedFolders: pinnedFolders || [], 
-      highlightedNotes: highlightedNotes || {} 
-    };
+    stmt.run(
+      userId,
+      JSON.stringify(pinnedFolders || []),
+      JSON.stringify(highlightedNotes || {})
+    );
     
-    fs.writeFileSync(PREFS_DATA_FILE, JSON.stringify(prefs, null, 2));
     res.json({ success: true });
-  } catch(e) { res.status(500).json({ error: 'Errore salvataggio preferenze' }); }
+  } catch(e) { 
+    res.status(500).json({ error: 'Errore salvataggio preferenze' }); 
+  }
 });
 
 app.get('/api/users-and-groups', async (req, res) => {
