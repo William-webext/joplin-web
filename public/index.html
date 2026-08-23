@@ -88,6 +88,7 @@
         .cm-has-submenu:hover .cm-submenu { display: block; }
         .cm-submenu { display: none; position: absolute; left: 100%; top: -5px; background: #1a1c1f; border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.6); min-width: 140px; padding: 5px 0; z-index: 10001; }
         #context-menu.menu-left .cm-submenu { left: auto; right: 100%; }
+        
         .color-circle { width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 
         @media print {
@@ -146,7 +147,7 @@
         <div class="modal-card" style="width: 320px;">
             <form onsubmit="event.preventDefault(); performLogin();">
                 <h3 style="margin-top:0; color:white;">Accedi al Portale</h3>
-                <p id="login-msg" style="font-size: 12px; color: #aaa; margin-bottom: 15px;">Inserisci le tue credenziali per procedere.</p>
+                <p id="login-msg" style="font-size: 12px; color: #aaa; margin-bottom: 15px;">La sessione scadrà alla chiusura del browser.</p>
                 <input type="email" id="emailInput" class="login-input" placeholder="Email" required>
                 <input type="password" id="passwordInput" class="login-input" placeholder="Password" required>
                 <button type="submit" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 10px;">Accedi</button>
@@ -186,18 +187,31 @@
         <button class="mobile-back-btn" onclick="history.back()">🔙 Taccuini</button>
         <div class="search-grid">
             <input type="text" id="searchInput" class="search-input-field" style="grid-column: 1 / -1;" placeholder="🔍 Cerca titolo, testo o tag..." onkeyup="updateNoteList()">
+            
             <select id="scopeSelect" class="search-select-field" style="grid-column: 1 / -1;" onchange="updateTagDropdown(); updateNoteList();">
                 <option value="all">🌍 Cerca ovunque</option>
                 <option value="current" selected>📁 Solo taccuino selezionato</option>
             </select>
-            <select id="sortSelect" class="search-select-field" onchange="updateNoteList()">
+            
+            <select id="sortSelect" class="search-select-field" style="grid-column: 1 / -1;" onchange="updateNoteList()">
                 <option value="title_asc">🔤 Nome (A - Z)</option>
                 <option value="title_desc">🔤 Nome (Z - A)</option>
                 <option value="updated_desc">🕒 Più recenti</option>
                 <option value="updated_asc">🕒 Meno recenti</option>
             </select>
+            
             <select id="tagSelect" class="search-select-field" onchange="updateNoteList()">
                 <option value="">🏷️ Tutti i Tag</option>
+            </select>
+
+            <select id="hlSelect" class="search-select-field" onchange="updateNoteList()">
+                <option value="">🖍️ Tutti i colori</option>
+                <option value="any">🖍️ Qualsiasi Evidenza</option>
+                <option value="yellow">🟡 Giallo</option>
+                <option value="pink">🔴 Rosa</option>
+                <option value="green">🟢 Verde</option>
+                <option value="blue">🔵 Azzurro</option>
+                <option value="orange">🟠 Arancione</option>
             </select>
         </div>
         <div id="notes-container" class="list-container">
@@ -225,8 +239,10 @@
         let currentFolderId = null;
         let currentNoteId = null;
         let expandedFolderIds = new Set();
-        let loggedUserId = localStorage.getItem('joplin_user_id');
-        let isAdmin = localStorage.getItem('joplin_is_admin') === 'true';
+        
+        // Uso di sessionStorage: la sessione scade alla chiusura della finestra
+        let loggedUserId = sessionStorage.getItem('joplin_user_id');
+        let isAdmin = sessionStorage.getItem('joplin_is_admin') === 'true';
         let ctxNote = null; 
 
         window.onload = function() {
@@ -309,10 +325,10 @@
 
         function handleAuthClick() {
             if (loggedUserId) {
-                localStorage.removeItem('joplin_user_id'); localStorage.removeItem('joplin_is_admin');
+                sessionStorage.removeItem('joplin_user_id'); sessionStorage.removeItem('joplin_is_admin');
                 loggedUserId = null; isAdmin = false; updateAuthUI(); fetchDataFromServer();
             } else {
-                document.getElementById('login-msg').innerText = 'Inserisci le tue credenziali per procedere.';
+                document.getElementById('login-msg').innerText = 'La sessione scadrà alla chiusura del browser.';
                 document.getElementById('login-modal').style.display = 'flex';
             }
         }
@@ -325,7 +341,9 @@
                 const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
                 const data = await res.json();
                 if(!res.ok) return alert('Errore: ' + data.error);
-                localStorage.setItem('joplin_user_id', data.userId); localStorage.setItem('joplin_is_admin', data.isAdmin);
+                
+                // Salvataggio temporaneo per sicurezza
+                sessionStorage.setItem('joplin_user_id', data.userId); sessionStorage.setItem('joplin_is_admin', data.isAdmin);
                 loggedUserId = data.userId; isAdmin = data.isAdmin; closeLoginModal(); updateAuthUI(); fetchDataFromServer();
             } catch(e) { alert('Errore connessione'); }
         }
@@ -341,12 +359,10 @@
                     }
                 } catch(e) {}
             } else {
-                // Recupero preferenze solo temporanee dalla cache locale per i visitatori pubblici
                 pinnedFolders = JSON.parse(localStorage.getItem('public_pinned') || '[]');
                 highlightedNotes = JSON.parse(localStorage.getItem('public_hl') || '{}');
             }
 
-            // Migrazione automatica se evidenziatore era un vecchio Array
             if (Array.isArray(highlightedNotes)) {
                 let migratedHl = {};
                 highlightedNotes.forEach(id => migratedHl[id] = 'yellow');
@@ -365,7 +381,6 @@
                     });
                 } catch(e) {}
             } else {
-                // Salvataggio preferenze solo temporanee nella cache locale per i visitatori pubblici
                 localStorage.setItem('public_pinned', JSON.stringify(pinnedFolders));
                 localStorage.setItem('public_hl', JSON.stringify(highlightedNotes));
             }
@@ -608,10 +623,22 @@
             const scopeVal = document.getElementById('scopeSelect').value;
             const sortVal = document.getElementById('sortSelect').value;
             const tagVal = document.getElementById('tagSelect').value;
+            const hlVal = document.getElementById('hlSelect').value;
             const container = document.getElementById('notes-container');
 
             let filtered = (scopeVal === 'all') ? [...allNotes] : allNotes.filter(n => n.parent_id === currentFolderId);
+            
             if (tagVal) filtered = filtered.filter(n => n.tags && n.tags.includes(tagVal));
+            
+            // Filtro Evidenziazioni
+            if (hlVal) {
+                filtered = filtered.filter(n => {
+                    const noteColor = highlightedNotes[n.id];
+                    if (hlVal === 'any') return !!noteColor;
+                    return noteColor === hlVal;
+                });
+            }
+
             if (query) {
                 filtered = filtered.filter(n => {
                     return (n.title && n.title.toLowerCase().includes(query)) || 
