@@ -193,9 +193,9 @@
             <div id="groups-container-list"></div>
             <hr style="border-color: var(--border-color); margin: 15px 0;">
             <h4 style="color:var(--text-main); margin-bottom: 5px;" data-i18n="create_group_title">Create New Group</h4>
-            <input type="text" id="newGroupName" class="login-input" data-i18n-ph="group_name_ph" placeholder="Group Name">
-            <button class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="createNewGroup()" data-i18n="create_btn">+ Create</button>
-            <button class="action-btn" style="margin-top: 15px;" onclick="closeGroupsModal()" data-i18n="close_btn">Close</button>
+            <input type="text" id="newGroupName" class="login-input" data-i18n-ph="group_name_ph" placeholder="Group Name" oninput="updateGroupModalButton()">
+            <button id="group-action-btn" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="handleGroupAction()">OK</button>
+            <button class="action-btn" style="margin-top: 10px;" onclick="cancelGroupsModal()" data-i18n="cancel_btn">Annulla</button>
         </div>
     </div>
 
@@ -350,6 +350,7 @@
                 create_group_title: "Create New Group",
                 group_name_ph: "Group Name",
                 create_btn: "+ Create",
+                ok_btn: "OK",
                 close_btn: "Close",
                 delete_btn: "Delete",
                 no_groups: "No groups created.",
@@ -407,6 +408,7 @@
                 create_group_title: "Crea Nuovo Gruppo",
                 group_name_ph: "Nome Gruppo",
                 create_btn: "+ Crea",
+                ok_btn: "OK",
                 close_btn: "Chiudi",
                 delete_btn: "Elimina",
                 no_groups: "Nessun gruppo creato.",
@@ -456,12 +458,14 @@
             renderFolderTree();
             updateTagDropdown();
             updateNoteList();
+            updateGroupModalButton();
         }
 
         let allFolders = [];
         let allNotes = [];
         let systemUsers = [];
         let systemGroups = [];
+        let originalSystemGroups = [];
         let pinnedFolders = [];
         let highlightedNotes = {};
         
@@ -707,20 +711,54 @@
             }
         }
 
-        async function openGroupsModal() { const res = await fetch('/api/users-and-groups'); const data = await res.json(); systemUsers = data.users || []; systemGroups = data.groups || []; renderGroupsList(); document.getElementById('groups-modal').style.display = 'flex'; }
-        function closeGroupsModal() { saveGroupsToServer(); document.getElementById('groups-modal').style.display = 'none'; }
-        async function saveGroupsToServer() { await fetch('/api/admin/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groups: systemGroups }) }); }
-        
-        function createNewGroup() { 
-            const nameInput = document.getElementById('newGroupName');
-            const name = nameInput.value.trim(); 
-            if (!name) {
-                showToast(t('err_enter_group_name'), true);
-                return;
-            } 
-            systemGroups.push({ id: 'grp_' + Date.now(), name: name, members: [] }); 
-            nameInput.value = ''; 
+        async function openGroupsModal() { 
+            const res = await fetch('/api/users-and-groups'); 
+            const data = await res.json(); 
+            systemUsers = data.users || []; 
+            systemGroups = data.groups || []; 
+            originalSystemGroups = JSON.parse(JSON.stringify(systemGroups));
             renderGroupsList(); 
+            document.getElementById('newGroupName').value = '';
+            updateGroupModalButton();
+            document.getElementById('groups-modal').style.display = 'flex'; 
+        }
+
+        function updateGroupModalButton() {
+            const btn = document.getElementById('group-action-btn');
+            if (!btn) return;
+            const inputVal = document.getElementById('newGroupName').value.trim();
+            if (inputVal.length > 0) {
+                btn.innerText = t('create_btn');
+            } else {
+                btn.innerText = t('ok_btn');
+            }
+        }
+
+        async function handleGroupAction() {
+            const nameInput = document.getElementById('newGroupName');
+            const name = nameInput.value.trim();
+            if (name.length > 0) {
+                systemGroups.push({ id: 'grp_' + Date.now(), name: name, members: [] });
+                nameInput.value = '';
+                renderGroupsList();
+                updateGroupModalButton();
+            } else {
+                await saveGroupsToServer();
+                document.getElementById('groups-modal').style.display = 'none';
+            }
+        }
+
+        function cancelGroupsModal() { 
+            systemGroups = JSON.parse(JSON.stringify(originalSystemGroups)); 
+            document.getElementById('groups-modal').style.display = 'none'; 
+        }
+
+        async function saveGroupsToServer() { 
+            await fetch('/api/admin/groups', { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ groups: systemGroups }) 
+            }); 
         }
 
         function deleteGroup(groupId) { systemGroups = systemGroups.filter(g => g.id !== groupId); renderGroupsList(); }
