@@ -59,7 +59,13 @@
         #editor h1 { font-size: 1.8em; margin-bottom: 0.5em; color: white; }
         #editor h2, #editor h3 { color: #569cd6; border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 30px; }
         #editor a { color: #569cd6; text-decoration: none; }
+        #editor img { max-width: 100%; border-radius: 4px; cursor: zoom-in; }
 
+        /* LIGHTBOX PER IMMAGINI SCHERMO INTERO */
+        #lightbox { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.88); z-index: 3000; justify-content: center; align-items: center; cursor: zoom-out; }
+        #lightbox img { max-width: 92%; max-height: 92%; border-radius: 6px; box-shadow: 0 0 25px rgba(0,0,0,0.8); }
+
+        /* OTTIMIZZAZIONE MOBILE */
         .mobile-back-btn { 
             display: none; 
             background: #1a1c1f; 
@@ -95,6 +101,11 @@
     </style>
 </head>
 <body class="view-sidebar">
+
+    <!-- LIGHTBOX OVERLAY -->
+    <div id="lightbox" onclick="closeLightbox()">
+        <img id="lightbox-img" src="">
+    </div>
 
     <!-- MODALE LOGIN -->
     <div id="login-modal" class="modal-overlay">
@@ -138,7 +149,7 @@
     <div class="resizer" id="resizer-1"></div>
 
     <div id="notes-list">
-        <button class="mobile-back-btn" onclick="showPanel('sidebar')">🔙 Taccuini</button>
+        <button class="mobile-back-btn" onclick="history.back()">🔙 Taccuini</button>
         <div style="display: flex; flex-direction: column; border-bottom: 1px solid var(--border-color); padding-top: 10px;">
             <input type="text" id="searchInput" class="search-bar" style="margin-top: 0;" placeholder="Cerca titolo o testo..." onkeyup="updateNoteList()">
         </div>
@@ -150,7 +161,7 @@
     <div class="resizer" id="resizer-2"></div>
 
     <div id="editor">
-        <button class="mobile-back-btn" onclick="showPanel('notes')">🔙 Note</button>
+        <button class="mobile-back-btn" onclick="history.back()">🔙 Note</button>
         <div id="editor-content">
             <div style="color: #888; text-align: center; margin-top: 20vh; font-size: 18px;">Seleziona una nota per la lettura</div>
         </div>
@@ -162,16 +173,38 @@
         let systemUsers = [];
         let systemGroups = [];
         let currentFolderId = null;
+        let currentNoteId = null;
         let loggedUserId = localStorage.getItem('joplin_user_id');
         let isAdmin = localStorage.getItem('joplin_is_admin') === 'true';
 
         window.onload = function() {
+            if (window.innerWidth <= 768) {
+                history.replaceState({ panel: 'sidebar' }, '', '#sidebar');
+            }
             updateAuthUI();
             fetchDataFromServer();
         };
 
-        function showPanel(panelName) {
+        // GESTIONE CRONOLOGIA BROWSER / TASTO INDIETRO ANDROID
+        function showPanel(panelName, pushHistory = true) {
             document.body.className = 'view-' + panelName;
+            if (pushHistory && window.innerWidth <= 768) {
+                history.pushState({ panel: panelName }, '', '#' + panelName);
+            }
+        }
+
+        window.onpopstate = function(event) {
+            if (window.innerWidth <= 768) {
+                if (event.state && event.state.panel) {
+                    showPanel(event.state.panel, false);
+                } else {
+                    showPanel('sidebar', false);
+                }
+            }
+        };
+
+        function closeLightbox() {
+            document.getElementById('lightbox').style.display = 'none';
         }
 
         function updateAuthUI() {
@@ -228,10 +261,17 @@
             } catch(e) { alert('Errore connessione'); }
         }
 
+        // CARICAMENTO DATI CON ANTI-CACHE
         async function fetchDataFromServer() {
+            const refreshBtn = document.querySelector('.sidebar-actions .action-btn');
+            const originalText = refreshBtn ? refreshBtn.innerText : '';
+            if (refreshBtn) refreshBtn.innerText = '⏳ Aggiornamento...';
+
             try {
-                const url = loggedUserId ? `/api/data?userId=${loggedUserId}` : '/api/data';
-                const res = await fetch(url);
+                const baseUrl = loggedUserId ? `/api/data?userId=${loggedUserId}` : '/api/data';
+                const cacheBustingUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') + `_t=${Date.now()}`;
+                
+                const res = await fetch(cacheBustingUrl);
                 const data = await res.json();
 
                 allFolders = data.folders || [];
@@ -239,7 +279,15 @@
 
                 renderFolderTree();
                 if (currentFolderId) updateNoteList();
-            } catch(e) {}
+                if (currentNoteId) {
+                    const openNote = allNotes.find(n => n.id === currentNoteId);
+                    if (openNote) renderContent(openNote);
+                }
+            } catch(e) {
+                console.error("Errore aggiornamento dati:", e);
+            } finally {
+                if (refreshBtn) refreshBtn.innerText = originalText;
+            }
         }
 
         async function openGroupsModal() {
@@ -322,7 +370,6 @@
             });
         }
 
-        // CALCOLO RICORSIVO DELLE NOTE PER UN TACCUINO E RELATIVI SOTTO-TACCUINI
         function getRecursiveNoteCount(folderId) {
             let count = allNotes.filter(n => n.parent_id === folderId).length;
             const childFolders = allFolders.filter(f => f.parent_id === folderId);
@@ -332,7 +379,6 @@
             return count;
         }
 
-        // RENDERING RICORSIVO ALBERO CON CONTEGGIO ACCURATO
         function renderFolderTree() {
             const container = document.getElementById('folders-container');
             container.innerHTML = '';
@@ -386,7 +432,7 @@
                     titleDiv.classList.add('active');
                     currentFolderId = folder.id;
                     updateNoteList();
-                    if (window.innerWidth <= 768) showPanel('notes');
+                    showPanel('notes', true);
                 };
 
                 wrapper.appendChild(titleDiv);
@@ -417,10 +463,11 @@
                 div.className = 'note-item';
                 div.innerHTML = `<strong>${note.title}</strong>`;
                 div.onclick = () => {
+                    currentNoteId = note.id;
                     document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
                     div.classList.add('active');
                     renderContent(note);
-                    if (window.innerWidth <= 768) showPanel('editor');
+                    showPanel('editor', true);
                 };
                 container.appendChild(div);
             });
@@ -431,6 +478,15 @@
             let cleanBody = note.body.replace(/:\/([a-zA-Z0-9]{32})(?:\.[a-zA-Z0-9]+)?/g, '/api/resource/$1');
             let htmlContent = marked.parse(cleanBody);
             editorContent.innerHTML = `<h1>${note.title}</h1><div>${htmlContent}</div>`;
+
+            // INGRANDIMENTO IMMAGINI (LIGHTBOX)
+            const images = editorContent.querySelectorAll('img');
+            images.forEach(img => {
+                img.onclick = function() {
+                    document.getElementById('lightbox-img').src = this.src;
+                    document.getElementById('lightbox').style.display = 'flex';
+                };
+            });
         }
     </script>
 </body>
