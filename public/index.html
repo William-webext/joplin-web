@@ -24,7 +24,7 @@
         ::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
 
         #sidebar { width: 240px; background-color: var(--bg-sidebar); display: flex; flex-direction: column; flex-shrink: 0; }
-        #notes-list { width: 320px; background-color: var(--bg-notelist); display: flex; flex-direction: column; flex-shrink: 0; border-left: 1px solid var(--border-color); }
+        #notes-list { width: 340px; background-color: var(--bg-notelist); display: flex; flex-direction: column; flex-shrink: 0; border-left: 1px solid var(--border-color); }
         #editor { flex-grow: 1; padding: 0; overflow-y: auto; background-color: var(--bg-editor); font-size: 15px; line-height: 1.6; min-width: 300px; display: flex; flex-direction: column; }
         
         .resizer { width: 4px; background-color: var(--border-color); cursor: col-resize; flex-shrink: 0; z-index: 10; transition: background-color 0.2s; }
@@ -49,8 +49,10 @@
         .note-item:hover { background-color: var(--hover-bg); }
         .note-item.active { background-color: var(--accent-blue); color: white; }
         
-        .search-input-field { width: 100%; box-sizing: border-box; padding: 8px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); border-radius: 4px; color: white; font-size: 13px; outline: none; }
-        .search-select-field { width: 100%; box-sizing: border-box; padding: 8px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; font-size: 13px; outline: none; cursor: pointer; }
+        /* GRIGLIA PER I CAMPI AFFIANCATI */
+        .search-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border-bottom: 1px solid var(--border-color); padding: 10px; background-color: #262a2f; }
+        .search-input-field { width: 100%; box-sizing: border-box; padding: 7px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); border-radius: 4px; color: white; font-size: 12px; outline: none; }
+        .search-select-field { width: 100%; box-sizing: border-box; padding: 7px 8px; background-color: #1a1c1f; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; font-size: 12px; outline: none; cursor: pointer; }
 
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 2000; }
         .modal-card { background: var(--bg-sidebar); padding: 25px; border-radius: 8px; width: 450px; border: 1px solid var(--border-color); max-height: 80vh; overflow-y: auto; }
@@ -151,12 +153,14 @@
 
     <div id="notes-list">
         <button class="mobile-back-btn" onclick="history.back()">🔙 Taccuini</button>
-        <div style="display: flex; flex-direction: column; border-bottom: 1px solid var(--border-color); padding: 10px; gap: 8px;">
-            <input type="text" id="searchInput" class="search-input-field" placeholder="Cerca titolo, testo o tag..." onkeyup="updateNoteList()">
+        
+        <!-- NUOVO LAYOUT DI RICERCA A GRIGLIA COMPATTO E AFFIANCATO -->
+        <div class="search-grid">
+            <input type="text" id="searchInput" class="search-input-field" style="grid-column: 1 / -1;" placeholder="🔍 Cerca titolo, testo o tag..." onkeyup="updateNoteList()">
             
-            <select id="scopeSelect" class="search-select-field" onchange="updateTagDropdown(); updateNoteList();">
+            <select id="scopeSelect" class="search-select-field" style="grid-column: 1 / -1;" onchange="updateTagDropdown(); updateNoteList();">
                 <option value="all">🌍 Cerca ovunque (Tutti i taccuini)</option>
-                <option value="current">📁 Solo taccuino selezionato</option>
+                <option value="current" selected>📁 Solo taccuino selezionato</option>
             </select>
             
             <select id="sortSelect" class="search-select-field" onchange="updateNoteList()">
@@ -167,9 +171,10 @@
             </select>
 
             <select id="tagSelect" class="search-select-field" onchange="updateNoteList()">
-                <option value="">🏷️ Filtra per Tag...</option>
+                <option value="">🏷️ Tutti i Tag</option>
             </select>
         </div>
+
         <div id="notes-container" class="list-container">
             <div style="padding:15px; color:#888; font-size: 13px;">Seleziona un taccuino...</div>
         </div>
@@ -544,7 +549,7 @@
             const tagSelect = document.getElementById('tagSelect');
             if (!tagSelect) return;
             const currentVal = tagSelect.value;
-            tagSelect.innerHTML = '<option value="">🏷️ Filtra per Tag...</option>';
+            tagSelect.innerHTML = '<option value="">🏷️ Tutti i Tag</option>';
             
             const scopeVal = document.getElementById('scopeSelect') ? document.getElementById('scopeSelect').value : 'current';
             const folderNotes = (scopeVal === 'all') 
@@ -636,7 +641,6 @@
             let htmlContent = marked.parse(cleanBody);
             editorContent.innerHTML = `<h1>${note.title}</h1><div>${htmlContent}</div>`;
 
-            // INGRANDIMENTO IMMAGINI (LIGHTBOX)
             const images = editorContent.querySelectorAll('img');
             images.forEach(img => {
                 img.onclick = function() {
@@ -644,7 +648,6 @@
                 };
             });
 
-            // APERTURA LINK IN NUOVA SCHEDA
             const links = editorContent.querySelectorAll('a');
             links.forEach(a => {
                 a.setAttribute('target', '_blank');
