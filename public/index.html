@@ -49,8 +49,8 @@
         .note-item:hover { background-color: var(--hover-bg); }
         .note-item.active { background-color: var(--accent-blue); color: white; }
         
-        .search-bar { margin: 0; padding: 6px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); border-radius: 4px; color: white; font-size: 13px; }
-        .sort-dropdown { padding: 6px; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; font-size: 12px; outline: none; cursor: pointer; }
+        .search-input-field { width: 100%; box-sizing: border-box; padding: 8px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); border-radius: 4px; color: white; font-size: 13px; outline: none; }
+        .search-select-field { width: 100%; box-sizing: border-box; padding: 8px 10px; background-color: #1a1c1f; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; font-size: 13px; outline: none; cursor: pointer; }
 
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 2000; }
         .modal-card { background: var(--bg-sidebar); padding: 25px; border-radius: 8px; width: 450px; border: 1px solid var(--border-color); max-height: 80vh; overflow-y: auto; }
@@ -152,18 +152,23 @@
     <div id="notes-list">
         <button class="mobile-back-btn" onclick="history.back()">🔙 Taccuini</button>
         <div style="display: flex; flex-direction: column; border-bottom: 1px solid var(--border-color); padding: 10px; gap: 8px;">
-            <input type="text" id="searchInput" class="search-bar" placeholder="Cerca titolo o testo..." onkeyup="updateNoteList()">
-            <div style="display: flex; gap: 6px;">
-                <select id="sortSelect" class="sort-dropdown" style="flex: 1;" onchange="updateNoteList()">
-                    <option value="updated_desc">🕒 Più recenti</option>
-                    <option value="updated_asc">🕒 Meno recenti</option>
-                    <option value="title_asc">🔤 Titolo (A-Z)</option>
-                    <option value="title_desc">🔤 Titolo (Z-A)</option>
-                </select>
-                <select id="tagSelect" class="sort-dropdown" style="flex: 1;" onchange="updateNoteList()">
-                    <option value="">🏷️ Tutti i Tag</option>
-                </select>
-            </div>
+            <input type="text" id="searchInput" class="search-input-field" placeholder="Cerca titolo, testo o tag..." onkeyup="updateNoteList()">
+            
+            <select id="scopeSelect" class="search-select-field" onchange="updateTagDropdown(); updateNoteList();">
+                <option value="all">🌍 Cerca ovunque (Tutti i taccuini)</option>
+                <option value="current">📁 Solo taccuino selezionato</option>
+            </select>
+            
+            <select id="sortSelect" class="search-select-field" onchange="updateNoteList()">
+                <option value="title_asc">🔤 Nome (A - Z)</option>
+                <option value="title_desc">🔤 Nome (Z - A)</option>
+                <option value="updated_desc">🕒 Più recenti</option>
+                <option value="updated_asc">🕒 Meno recenti</option>
+            </select>
+
+            <select id="tagSelect" class="search-select-field" onchange="updateNoteList()">
+                <option value="">🏷️ Filtra per Tag...</option>
+            </select>
         </div>
         <div id="notes-container" class="list-container">
             <div style="padding:15px; color:#888; font-size: 13px;">Seleziona un taccuino...</div>
@@ -308,10 +313,9 @@
                 allNotes = data.notes || [];
 
                 renderFolderTree();
-                if (currentFolderId) {
-                    updateTagDropdown();
-                    updateNoteList();
-                }
+                updateTagDropdown();
+                updateNoteList();
+
                 if (currentNoteId) {
                     const openNote = allNotes.find(n => n.id === currentNoteId);
                     if (openNote) renderContent(openNote);
@@ -473,6 +477,11 @@
                     document.querySelectorAll('.folder-title').forEach(el => el.classList.remove('active'));
                     titleDiv.classList.add('active');
                     currentFolderId = folder.id;
+                    
+                    // Switch scope to current notebook if user clicks a folder
+                    const scopeSelect = document.getElementById('scopeSelect');
+                    if (scopeSelect) scopeSelect.value = 'current';
+
                     updateTagDropdown();
                     updateNoteList();
                     showPanel('notes', true);
@@ -493,9 +502,13 @@
             const tagSelect = document.getElementById('tagSelect');
             if (!tagSelect) return;
             const currentVal = tagSelect.value;
-            tagSelect.innerHTML = '<option value="">🏷️ Tutti i Tag</option>';
+            tagSelect.innerHTML = '<option value="">🏷️ Filtra per Tag...</option>';
             
-            const folderNotes = allNotes.filter(n => n.parent_id === currentFolderId);
+            const scopeVal = document.getElementById('scopeSelect') ? document.getElementById('scopeSelect').value : 'current';
+            const folderNotes = (scopeVal === 'all') 
+                ? allNotes 
+                : allNotes.filter(n => n.parent_id === currentFolderId);
+
             const uniqueTags = new Set();
             folderNotes.forEach(n => {
                 if (n.tags && Array.isArray(n.tags)) {
@@ -514,20 +527,32 @@
 
         function updateNoteList() {
             const query = document.getElementById('searchInput').value.toLowerCase().trim();
+            const scopeVal = document.getElementById('scopeSelect').value;
             const sortVal = document.getElementById('sortSelect').value;
             const tagVal = document.getElementById('tagSelect').value;
             const container = document.getElementById('notes-container');
 
-            let filtered = allNotes.filter(n => n.parent_id === currentFolderId);
+            // 1. FILTRAGGIO AMBITO (Tutti i taccuini vs Taccuino Selezionato)
+            let filtered = (scopeVal === 'all') 
+                ? [...allNotes] 
+                : allNotes.filter(n => n.parent_id === currentFolderId);
 
+            // 2. FILTRAGGIO TAG
             if (tagVal) {
                 filtered = filtered.filter(n => n.tags && n.tags.includes(tagVal));
             }
 
+            // 3. RICERCA TESTUALE ESTESA (Titolo, Body e Tag)
             if (query) {
-                filtered = filtered.filter(n => n.title.toLowerCase().includes(query) || n.body.toLowerCase().includes(query));
+                filtered = filtered.filter(n => {
+                    const matchTitle = n.title && n.title.toLowerCase().includes(query);
+                    const matchBody = n.body && n.body.toLowerCase().includes(query);
+                    const matchTag = n.tags && n.tags.some(t => t.toLowerCase().includes(query));
+                    return matchTitle || matchBody || matchTag;
+                });
             }
 
+            // 4. ORDINAMENTO
             filtered.sort((a, b) => {
                 if (sortVal === 'updated_desc') return (b.updated_time || 0) - (a.updated_time || 0);
                 if (sortVal === 'updated_asc') return (a.updated_time || 0) - (b.updated_time || 0);
@@ -537,8 +562,11 @@
             });
 
             container.innerHTML = '';
-            if(filtered.length === 0) {
-                container.innerHTML = '<div style="padding:15px; color:#888;">Nessuna nota trovata</div>'; 
+            if (filtered.length === 0) {
+                const emptyMsg = scopeVal === 'current' && !currentFolderId 
+                    ? 'Seleziona un taccuino per iniziare...' 
+                    : 'Nessuna nota trovata';
+                container.innerHTML = `<div style="padding:15px; color:#888;">${emptyMsg}</div>`; 
                 return;
             }
 
@@ -552,7 +580,7 @@
                     tagsBadge = note.tags.map(t => `<span style="font-size:10px; background:#3a3f45; color:#aaa; padding:1px 4px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
                 }
 
-                div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong>${note.title}</strong><div>${tagsBadge}</div></div>`;
+                div.innerHTML = `<div style="display:flex; justify-between; align-items:center;"><strong>${note.title}</strong><div>${tagsBadge}</div></div>`;
                 div.onclick = () => {
                     currentNoteId = note.id;
                     document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
