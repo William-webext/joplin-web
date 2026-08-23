@@ -155,6 +155,10 @@ function getPublishedData() {
 
     return { folders, notes };
   } catch (e) {
+    // Prima l'errore spariva nel nulla: se il DB avesse un problema (file corrotto, schema
+    // disallineato dopo una migrazione a mano, ecc.) l'app tornava silenziosamente una lista
+    // vuota, indistinguibile da "non c'è niente di pubblicato" — impossibile da diagnosticare.
+    console.error('getPublishedData: errore nella lettura da SQLite:', e.message);
     return { folders: [], notes: [] };
   }
 }
@@ -214,6 +218,7 @@ function getGroupsData() {
       members: JSON.parse(r.members || '[]')
     }));
   } catch (e) {
+    console.error('getGroupsData: errore nella lettura da SQLite:', e.message);
     return [];
   }
 }
@@ -294,15 +299,26 @@ setInterval(() => {
   }
 }, LOGIN_WINDOW_MS).unref();
 
-async function authenticateRequest(auth) {
-  if (!auth || !auth.email || !auth.password) return false;
+// Unica fonte di verità per "email+password sono validi": prima questa stessa query e lo stesso
+// bcrypt.compare erano scritti separatamente sia qui sia dentro /api/login — due copie della
+// stessa logica di sicurezza da mantenere allineate è un rischio inutile (basta dimenticare di
+// aggiornarne una sola in futuro per introdurre un'incoerenza).
+async function findAuthenticatedUser(email, password) {
+  if (!email || !password) return null;
   try {
-    const result = await pool.query('SELECT password FROM users WHERE email = $1', [auth.email]);
-    if (result.rows.length === 0) return false;
-    return await bcrypt.compare(auth.password, result.rows[0].password);
+    const result = await pool.query('SELECT id, email, is_admin, password FROM users WHERE email = $1', [email]);
+    if (result.rows.length === 0) return null;
+    const match = await bcrypt.compare(password, result.rows[0].password);
+    if (!match) return null;
+    return { id: result.rows[0].id, email: result.rows[0].email, isAdmin: !!result.rows[0].is_admin };
   } catch (e) {
-    return false;
+    return null;
   }
+}
+
+async function authenticateRequest(auth) {
+  if (!auth) return false;
+  return !!(await findAuthenticatedUser(auth.email, auth.password));
 }
 
 // 4. API PREFERENZE UI (SQLITE)
@@ -405,19 +421,18 @@ app.post('/api/publish', async (req, res) => {
 
 app.post('/api/login', loginRateLimit, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, email, is_admin, password FROM users WHERE email = $1', [req.body.email]);
+    const user = await findAuthenticatedUser(req.body.email, req.body.password);
     // Stesso messaggio generico per email inesistente e password errata: evita di rivelare quali email sono registrate (user enumeration)
-    if (result.rows.length === 0) return res.status(401).json({ error: 'Credenziali non valide' });
-    if (!(await bcrypt.compare(req.body.password, result.rows[0].password))) return res.status(401).json({ error: 'Credenziali non valide' });
+    if (!user) return res.status(401).json({ error: 'Credenziali non valide' });
 
-    const { token, expiresAt } = createSession(result.rows[0].id, result.rows[0].email, !!result.rows[0].is_admin);
+    const { token, expiresAt } = createSession(user.id, user.email, user.isAdmin);
     res.json({
       success: true,
       token,
       expiresAt,
-      userId: result.rows[0].id,
-      email: result.rows[0].email,
-      isAdmin: !!result.rows[0].is_admin
+      userId: user.id,
+      email: user.email,
+      isAdmin: user.isAdmin
     });
   } catch (err) { res.status(500).json({ error: 'Errore interno' }); }
 });
@@ -478,7 +493,9 @@ app.get('/api/data', optionalAuth, async (req, res) => {
         const myTagIds = noteTags.filter(nt => nt.note_id === note.id).map(nt => nt.tag_id);
         note.tags = tags.filter(t => myTagIds.includes(t.id)).map(t => t.title);
       });
-    } catch (err) {}
+    } catch (err) {
+      console.error('/api/data (contenuti privati utente): errore nella query a Postgres:', err.message);
+    }
   }
 
   const publishedData = getPublishedData();
@@ -527,7 +544,9 @@ app.get('/api/data', optionalAuth, async (req, res) => {
           else { allNotes.push(freshNote); noteIdsSet.add(row.jop_id); }
         }
       });
-    } catch (err) {}
+    } catch (err) {
+      console.error('/api/data (note pubblicate aggiornate live): errore nella query a Postgres:', err.message);
+    }
   }
 
   res.json({ folders: allFolders, notes: allNotes, isAuth });
