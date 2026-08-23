@@ -69,7 +69,6 @@
         .note-item.active { background-color: var(--accent-blue) !important; color: white !important; }
         .note-item.active strong { color: white !important; }
 
-        /* EVIDENZIATORI PASTELLO - APPLICATI A TUTTI I TEMI PER MASSIMA LEGGIBILITÀ */
         .note-item.hl-yellow { background-color: #fef9c3 !important; color: #1f2328 !important; border-left: 4px solid #ca8a04 !important; }
         .note-item.hl-pink { background-color: #ffe4e6 !important; color: #1f2328 !important; border-left: 4px solid #e11d48 !important; }
         .note-item.hl-green { background-color: #dcfce7 !important; color: #1f2328 !important; border-left: 4px solid #16a34a !important; }
@@ -276,6 +275,25 @@
     </div>
 
     <script>
+        const COLOR_EMOJIS = {
+            yellow: '🟡 ',
+            pink: '🔴 ',
+            green: '🟢 ',
+            blue: '🔵 ',
+            orange: '🟠 '
+        };
+        const ALL_EMOJIS = ['🟡 ', '🔴 ', '🟢 ', '🔵 ', '🟠 '];
+
+        function getNoteDisplayTitle(note, highlightedNotesMap) {
+            let cleanTitle = note.title || '';
+            ALL_EMOJIS.forEach(e => {
+                if (cleanTitle.startsWith(e)) cleanTitle = cleanTitle.substring(e.length);
+            });
+            const activeColor = highlightedNotesMap ? highlightedNotesMap[note.id] : null;
+            const emoji = (activeColor && COLOR_EMOJIS[activeColor]) ? COLOR_EMOJIS[activeColor] : '';
+            return `${emoji}${cleanTitle}`;
+        }
+
         const i18nDict = {
             en: {
                 notebooks_title: "📓 Notebooks",
@@ -835,6 +853,9 @@
             }
             savePreferences();
             updateNoteList();
+            if (currentNoteId === ctxNote.id) {
+                renderContent(ctxNote);
+            }
             document.getElementById('context-menu').style.display = 'none';
         }
 
@@ -883,17 +904,20 @@
 
             if (query) {
                 filtered = filtered.filter(n => {
-                    return (n.title && n.title.toLowerCase().includes(query)) || 
+                    const displayTitle = getNoteDisplayTitle(n, highlightedNotes);
+                    return (displayTitle && displayTitle.toLowerCase().includes(query)) || 
                            (n.body && n.body.toLowerCase().includes(query)) || 
                            (n.tags && n.tags.some(t => t.toLowerCase().includes(query)));
                 });
             }
 
             filtered.sort((a, b) => {
+                const titleA = getNoteDisplayTitle(a, highlightedNotes);
+                const titleB = getNoteDisplayTitle(b, highlightedNotes);
                 if (sortVal === 'updated_desc') return (b.updated_time || 0) - (a.updated_time || 0);
                 if (sortVal === 'updated_asc') return (a.updated_time || 0) - (b.updated_time || 0);
-                if (sortVal === 'title_asc') return a.title.localeCompare(b.title);
-                if (sortVal === 'title_desc') return b.title.localeCompare(a.title);
+                if (sortVal === 'title_asc') return titleA.localeCompare(titleB);
+                if (sortVal === 'title_desc') return titleB.localeCompare(titleA);
                 return 0;
             });
 
@@ -919,7 +943,9 @@
                     tagsBadge = note.tags.map(t => `<span class="tag-badge" style="font-size:10px; background:var(--badge-bg); color:inherit; padding:1px 5px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
                 }
 
-                div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${note.title}</strong><div>${tagsBadge}</div></div>`;
+                const displayTitle = getNoteDisplayTitle(note, highlightedNotes);
+
+                div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${displayTitle}</strong><div>${tagsBadge}</div></div>`;
                 
                 div.onclick = () => {
                     currentNoteId = note.id;
@@ -957,7 +983,9 @@
             let cleanBody = note.body.replace(/:\/([a-zA-Z0-9]{32})(?:\.([a-zA-Z0-9]+))?/g, '/api/resource/$1');
             let htmlContent = marked.parse(cleanBody);
             
-            editorContent.innerHTML = `<h1>${note.title}</h1><div id="md-rendered-body">${htmlContent}</div>`;
+            const displayTitle = getNoteDisplayTitle(note, highlightedNotes);
+
+            editorContent.innerHTML = `<h1>${displayTitle}</h1><div id="md-rendered-body">${htmlContent}</div>`;
 
             editorContent.querySelectorAll('img').forEach(img => {
                 img.onclick = function() { openLightbox(this.src); };
