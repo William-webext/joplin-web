@@ -41,7 +41,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// FUNZIONE VERIFICA CREDENZIALI PLUGIN
+// VERIFICA CREDENZIALI PLUGIN
 async function authenticateRequest(auth) {
   if (!auth || !auth.email || !auth.password) return false;
   try {
@@ -85,7 +85,6 @@ app.get('/api/published-list', (req, res) => {
   res.json({ folders: list });
 });
 
-// API PUBBLICAZIONE CON PROTEZIONE AUTENTICAZIONE
 app.post('/api/publish', async (req, res) => {
   const { auth, folder, folders, notes, updateOnlyVisibility } = req.body;
 
@@ -161,6 +160,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
+// ROBUST DATA FETCHING WITH LIVE DB OVERRIDE FOR PUBLISHED NOTES
 app.get('/api/data', async (req, res) => {
   const userId = req.query.userId;
   const isAuth = !!userId;
@@ -181,6 +181,7 @@ app.get('/api/data', async (req, res) => {
   const folderIdsSet = new Set();
   const noteIdsSet = new Set();
 
+  // 1. CARICAMENTO DATI UTENTE AUTENTICATO (DA POSTGRES)
   if (isAuth) {
     try {
       const queryText = `
@@ -236,6 +237,7 @@ app.get('/api/data', async (req, res) => {
     } catch (err) { console.error("Errore DB Live:", err); }
   }
 
+  // 2. UNIONE TACCUINI PUBBLICATI CON PERMESSI
   const publishedData = getPublishedData();
   const groupsData = getGroupsData();
 
@@ -274,14 +276,51 @@ app.get('/api/data', async (req, res) => {
   });
 
   const visiblePublishedFolderIds = visiblePublishedFolders.map(f => f.id);
-  const visiblePublishedNotes = publishedData.notes.filter(n => visiblePublishedFolderIds.includes(n.parent_id));
 
+  // Fallback: aggiungi note dal JSON statico
+  const visiblePublishedNotes = publishedData.notes.filter(n => visiblePublishedFolderIds.includes(n.parent_id));
   visiblePublishedNotes.forEach(n => {
     if (!noteIdsSet.has(n.id)) {
       allNotes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.updated_time, tags: ['Pubblicato'] });
       noteIdsSet.add(n.id);
     }
   });
+
+  // 3. RECUPERO IN TEMPO REALE DA POSTGRESQL PER I TACCUINI PUBBLICATI
+  if (visiblePublishedFolderIds.length > 0) {
+    try {
+      const dbLiveQuery = `SELECT jop_id, jop_parent_id, content FROM items WHERE jop_type = 1`;
+      const dbLiveResult = await pool.query(dbLiveQuery);
+      
+      dbLiveResult.rows.forEach(row => {
+        let parsed = {};
+        try { parsed = JSON.parse(row.content.toString('utf-8')); } catch(e) { return; }
+        if (Number(parsed.deleted_time || 0) > 0 || Number(parsed.is_conflict || 0) > 0) return;
+
+        const effParent = row.jop_parent_id || parsed.parent_id || '';
+        if (visiblePublishedFolderIds.includes(effParent)) {
+          const freshNote = {
+            id: row.jop_id,
+            parent_id: effParent,
+            title: parsed.title || 'Nuova Nota',
+            body: parsed.body || '',
+            updated_time: Number(parsed.user_updated_time || parsed.updated_time || 0),
+            tags: ['Pubblicato']
+          };
+
+          const existingIndex = allNotes.findIndex(n => n.id === row.jop_id);
+          if (existingIndex >= 0) {
+            allNotes[existingIndex] = freshNote;
+          } else {
+            allNotes.push(freshNote);
+            noteIdsSet.add(row.jop_id);
+          }
+        }
+      });
+    } catch (err) {
+      console.error("Errore override live da DB:", err);
+    }
+  }
 
   res.json({ folders: allFolders, notes: allNotes, isAuth });
 });
