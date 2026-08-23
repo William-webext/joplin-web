@@ -277,29 +277,23 @@
     </div>
 
     <script>
-        const COLOR_EMOJIS = {
-            yellow: '🟡 ',
-            pink: '🔴 ',
-            green: '🟢 ',
-            blue: '🔵 ',
-            orange: '🟠 '
-        };
         const ALL_EMOJIS = ['🟡 ', '🔴 ', '🟢 ', '🔵 ', '🟠 ', '🟡', '🔴', '🟢', '🔵', '🟠'];
 
+        // Ripulisce il titolo da qualsiasi emoji Unicode (pallini o icone generiche) all'inizio e alla fine
         function getCleanTitle(title) {
             let clean = title || '';
             ALL_EMOJIS.forEach(e => {
                 if (clean.startsWith(e)) clean = clean.substring(e.length);
                 if (clean.endsWith(e)) clean = clean.substring(0, clean.length - e.length);
             });
+            // Rimuove qualsiasi emoji Unicode generica all'inizio o alla fine del testo
+            clean = clean.replace(/^[\p{Extended_Pictographic}\s]+/gu, '');
+            clean = clean.replace(/[\p{Extended_Pictographic}\s]+$/gu, '');
             return clean.trim();
         }
 
-        function getNoteDisplayTitle(note, highlightedNotesMap) {
-            let cleanTitle = getCleanTitle(note.title);
-            const activeColor = highlightedNotesMap ? highlightedNotesMap[note.id] : null;
-            const emoji = (activeColor && COLOR_EMOJIS[activeColor]) ? COLOR_EMOJIS[activeColor] : '';
-            return `${emoji}${cleanTitle}`;
+        function getNoteDisplayTitle(note) {
+            return getCleanTitle(note.title);
         }
 
         const i18nDict = {
@@ -434,8 +428,6 @@
             return (i18nDict[currentLang] && i18nDict[currentLang][key]) || (i18nDict['en'][key]) || key;
         }
 
-        // Sanifica testo proveniente da dati utente (titoli note/cartelle, nomi gruppi, email)
-        // prima di interpolarlo in innerHTML. Va usato ovunque un valore non fisso finisca in un template HTML.
         function escapeHtml(str) {
             if (str === null || str === undefined) return '';
             return String(str)
@@ -492,8 +484,6 @@
         let sessionToken = sessionStorage.getItem('joplin_session_token');
         let ctxNote = null; 
 
-        // Header da allegare alle chiamate autenticate. Se non c'è token, la richiesta parte comunque
-        // (utile per /api/data in modalità pubblica) ma il server la tratterà come anonima.
         function authHeaders(extra) {
             const headers = Object.assign({}, extra || {});
             if (sessionToken) headers['Authorization'] = 'Bearer ' + sessionToken;
@@ -622,7 +612,6 @@
                 sessionStorage.removeItem('joplin_is_admin');
                 sessionStorage.removeItem('joplin_session_token');
                 loggedUserId = null; loggedUserEmail = null; isAdmin = false; sessionToken = null; updateAuthUI(); fetchDataFromServer();
-                // Best-effort: invalida il token anche lato server, così se qualcuno lo intercettasse non resterebbe valido per 24h
                 if (tokenToRevoke) {
                     fetch('/api/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + tokenToRevoke } }).catch(() => {});
                 }
@@ -695,10 +684,7 @@
             try {
                 await fetchPreferences();
 
-                // Prima l'identità veniva dal parametro ?userId= (falsificabile da chiunque); ora la decide
-                // solo il token nell'header Authorization, verificato lato server.
                 const cacheBustingUrl = '/api/data' + `?_t=${Date.now()}`;
-                
                 const res = await fetch(cacheBustingUrl, { headers: authHeaders() });
                 const data = await res.json();
 
@@ -1005,7 +991,7 @@
 
             if (query) {
                 filtered = filtered.filter(n => {
-                    const displayTitle = getNoteDisplayTitle(n, highlightedNotes);
+                    const displayTitle = getNoteDisplayTitle(n);
                     const cleanTitle = getCleanTitle(n.title);
                     return (displayTitle && displayTitle.toLowerCase().includes(query)) || 
                            (cleanTitle && cleanTitle.toLowerCase().includes(query)) ||
@@ -1014,7 +1000,7 @@
                 });
             }
 
-            // ORDINAMENTO ALFABETICO SUL TITOLO PULITO (IGNORA L'EMOJI ALL'INIZIO)
+            // ORDINAMENTO ALFABETICO SUL TITOLO PULITO
             filtered.sort((a, b) => {
                 const titleA = getCleanTitle(a.title);
                 const titleB = getCleanTitle(b.title);
@@ -1048,7 +1034,7 @@
                     tagsBadge = note.tags.map(tg => `<span class="tag-badge" style="font-size:10px; background:var(--badge-bg); color:inherit; padding:1px 5px; border-radius:3px; margin-left:4px;">${escapeHtml(tg)}</span>`).join('');
                 }
 
-                const displayTitle = escapeHtml(getNoteDisplayTitle(note, highlightedNotes));
+                const displayTitle = escapeHtml(getNoteDisplayTitle(note));
 
                 div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${displayTitle}</strong><div>${tagsBadge}</div></div>`;
                 
@@ -1087,11 +1073,9 @@
             
             let cleanBody = note.body.replace(/:\/([a-zA-Z0-9]{32})(?:\.([a-zA-Z0-9]+))?/g, '/api/resource/$1');
             let rawHtml = marked.parse(cleanBody);
-            // Il body della nota può contenere HTML/script arbitrario (markdown permette HTML passthrough):
-            // senza sanitizzazione qui una nota pubblicata diventa un vettore di stored XSS per chi la visualizza.
             let htmlContent = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target'] });
 
-            const displayTitle = escapeHtml(getNoteDisplayTitle(note, highlightedNotes));
+            const displayTitle = escapeHtml(getNoteDisplayTitle(note));
 
             editorContent.innerHTML = `<h1>${displayTitle}</h1><div id="md-rendered-body">${htmlContent}</div>`;
 
