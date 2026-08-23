@@ -18,8 +18,7 @@ const PREFS_DATA_FILE = path.join(DATA_DIR, 'preferences.json');
 
 if (!fs.existsSync(PUBLISHED_DATA_FILE)) fs.writeFileSync(PUBLISHED_DATA_FILE, JSON.stringify({ folders: [], notes: [] }, null, 2));
 if (!fs.existsSync(GROUPS_DATA_FILE)) fs.writeFileSync(GROUPS_DATA_FILE, JSON.stringify([], null, 2));
-// Modificato il default di highlightedNotes da Array [] a Oggetto {}
-if (!fs.existsSync(PREFS_DATA_FILE)) fs.writeFileSync(PREFS_DATA_FILE, JSON.stringify({ pinnedFolders: [], highlightedNotes: {} }, null, 2));
+if (!fs.existsSync(PREFS_DATA_FILE)) fs.writeFileSync(PREFS_DATA_FILE, JSON.stringify({}, null, 2));
 
 function getPublishedData() {
   try { return JSON.parse(fs.readFileSync(PUBLISHED_DATA_FILE, 'utf-8')); } catch (e) { return { folders: [], notes: [] }; }
@@ -55,15 +54,36 @@ async function authenticateRequest(auth) {
   }
 }
 
-// API PREFERENZE UI
+// API PREFERENZE UI (Ora suddivise per Utente)
 app.get('/api/preferences', (req, res) => {
-  try { res.json(JSON.parse(fs.readFileSync(PREFS_DATA_FILE, 'utf-8'))); } 
+  const userId = req.query.userId;
+  if (!userId) return res.json({ pinnedFolders: [], highlightedNotes: {} });
+  
+  try { 
+    let prefs = JSON.parse(fs.readFileSync(PREFS_DATA_FILE, 'utf-8')); 
+    // Fix migrazione se il file aveva il vecchio formato senza userId
+    if (prefs.pinnedFolders || Array.isArray(prefs.highlightedNotes)) prefs = {}; 
+    
+    res.json(prefs[userId] || { pinnedFolders: [], highlightedNotes: {} }); 
+  } 
   catch(e) { res.json({ pinnedFolders: [], highlightedNotes: {} }); }
 });
 
 app.post('/api/preferences', (req, res) => {
+  const { userId, pinnedFolders, highlightedNotes } = req.body;
+  if (!userId) return res.status(400).json({ error: 'Nessun utente specificato' });
+
   try {
-    fs.writeFileSync(PREFS_DATA_FILE, JSON.stringify(req.body, null, 2));
+    let prefs = {};
+    try { prefs = JSON.parse(fs.readFileSync(PREFS_DATA_FILE, 'utf-8')); } catch(e) {}
+    if (prefs.pinnedFolders || Array.isArray(prefs.highlightedNotes)) prefs = {}; 
+    
+    prefs[userId] = { 
+      pinnedFolders: pinnedFolders || [], 
+      highlightedNotes: highlightedNotes || {} 
+    };
+    
+    fs.writeFileSync(PREFS_DATA_FILE, JSON.stringify(prefs, null, 2));
     res.json({ success: true });
   } catch(e) { res.status(500).json({ error: 'Errore salvataggio preferenze' }); }
 });
