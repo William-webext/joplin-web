@@ -27,7 +27,7 @@
         #notes-list { width: 320px; background-color: var(--bg-notelist); display: flex; flex-direction: column; flex-shrink: 0; border-left: 1px solid var(--border-color); }
         #editor { flex-grow: 1; padding: 0; overflow-y: auto; background-color: var(--bg-editor); font-size: 15px; line-height: 1.6; min-width: 300px; display: flex; flex-direction: column; }
         
-        .resizer { width: 4px; background-color: var(--border-color); cursor: col-resize; flex-shrink: 0; z-index: 10; }
+        .resizer { width: 4px; background-color: var(--border-color); cursor: col-resize; flex-shrink: 0; z-index: 10; transition: background-color 0.2s; }
         .resizer:hover, .resizer.active { background-color: var(--accent-blue); }
 
         .header { padding: 12px 15px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
@@ -199,9 +199,52 @@
             if (window.innerWidth <= 768) {
                 history.replaceState({ panel: 'sidebar' }, '', '#sidebar');
             }
+            initResizers();
             updateAuthUI();
             fetchDataFromServer();
         };
+
+        function initResizers() {
+            const sidebar = document.getElementById('sidebar');
+            const notesList = document.getElementById('notes-list');
+            const resizer1 = document.getElementById('resizer-1');
+            const resizer2 = document.getElementById('resizer-2');
+
+            function attachResize(resizer, targetElement, minWidth, maxWidth) {
+                if (!resizer || !targetElement) return;
+
+                resizer.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    let startX = e.clientX;
+                    let startWidth = targetElement.getBoundingClientRect().width;
+                    resizer.classList.add('active');
+                    document.body.style.userSelect = 'none';
+                    document.body.style.cursor = 'col-resize';
+
+                    function onMouseMove(moveEvent) {
+                        let deltaX = moveEvent.clientX - startX;
+                        let newWidth = startWidth + deltaX;
+                        if (newWidth >= minWidth && newWidth <= maxWidth) {
+                            targetElement.style.width = newWidth + 'px';
+                        }
+                    }
+
+                    function onMouseUp() {
+                        resizer.classList.remove('active');
+                        document.body.style.userSelect = '';
+                        document.body.style.cursor = '';
+                        window.removeEventListener('mousemove', onMouseMove);
+                        window.removeEventListener('mouseup', onMouseUp);
+                    }
+
+                    window.addEventListener('mousemove', onMouseMove);
+                    window.addEventListener('mouseup', onMouseUp);
+                });
+            }
+
+            attachResize(resizer1, sidebar, 150, 500);
+            attachResize(resizer2, notesList, 200, 600);
+        }
 
         function showPanel(panelName, pushHistory = true) {
             document.body.className = 'view-' + panelName;
@@ -478,7 +521,6 @@
                     titleDiv.classList.add('active');
                     currentFolderId = folder.id;
                     
-                    // Switch scope to current notebook if user clicks a folder
                     const scopeSelect = document.getElementById('scopeSelect');
                     if (scopeSelect) scopeSelect.value = 'current';
 
@@ -532,17 +574,14 @@
             const tagVal = document.getElementById('tagSelect').value;
             const container = document.getElementById('notes-container');
 
-            // 1. FILTRAGGIO AMBITO (Tutti i taccuini vs Taccuino Selezionato)
             let filtered = (scopeVal === 'all') 
                 ? [...allNotes] 
                 : allNotes.filter(n => n.parent_id === currentFolderId);
 
-            // 2. FILTRAGGIO TAG
             if (tagVal) {
                 filtered = filtered.filter(n => n.tags && n.tags.includes(tagVal));
             }
 
-            // 3. RICERCA TESTUALE ESTESA (Titolo, Body e Tag)
             if (query) {
                 filtered = filtered.filter(n => {
                     const matchTitle = n.title && n.title.toLowerCase().includes(query);
@@ -552,7 +591,6 @@
                 });
             }
 
-            // 4. ORDINAMENTO
             filtered.sort((a, b) => {
                 if (sortVal === 'updated_desc') return (b.updated_time || 0) - (a.updated_time || 0);
                 if (sortVal === 'updated_asc') return (a.updated_time || 0) - (b.updated_time || 0);
@@ -580,7 +618,7 @@
                     tagsBadge = note.tags.map(t => `<span style="font-size:10px; background:#3a3f45; color:#aaa; padding:1px 4px; border-radius:3px; margin-left:4px;">${t}</span>`).join('');
                 }
 
-                div.innerHTML = `<div style="display:flex; justify-between; align-items:center;"><strong>${note.title}</strong><div>${tagsBadge}</div></div>`;
+                div.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong>${note.title}</strong><div>${tagsBadge}</div></div>`;
                 div.onclick = () => {
                     currentNoteId = note.id;
                     document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
@@ -598,11 +636,19 @@
             let htmlContent = marked.parse(cleanBody);
             editorContent.innerHTML = `<h1>${note.title}</h1><div>${htmlContent}</div>`;
 
+            // INGRANDIMENTO IMMAGINI (LIGHTBOX)
             const images = editorContent.querySelectorAll('img');
             images.forEach(img => {
                 img.onclick = function() {
                     openLightbox(this.src);
                 };
+            });
+
+            // APERTURA LINK IN NUOVA SCHEDA
+            const links = editorContent.querySelectorAll('a');
+            links.forEach(a => {
+                a.setAttribute('target', '_blank');
+                a.setAttribute('rel', 'noopener noreferrer');
             });
         }
     </script>
