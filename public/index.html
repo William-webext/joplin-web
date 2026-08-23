@@ -342,6 +342,7 @@
                 login_title: "Portal Login",
                 login_desc: "Session will expire when browser is closed.",
                 login_private_msg: "<span style='color:#ff6b6b; font-weight:bold;'>This note is private.</span><br>Please login to view it.",
+                session_expired_msg: "Your session has expired. Please login again.",
                 cancel_btn: "Cancel",
                 groups_title: "⚙️ Group Management",
                 create_group_title: "Create New Group",
@@ -400,6 +401,7 @@
                 login_title: "Accedi al Portale",
                 login_desc: "La sessione scadrà alla chiusura del browser.",
                 login_private_msg: "<span style='color:#ff6b6b; font-weight:bold;'>Questa nota è privata.</span><br>Effettua l'accesso per visualizzarla.",
+                session_expired_msg: "La tua sessione è scaduta. Effettua di nuovo l'accesso.",
                 cancel_btn: "Annulla",
                 groups_title: "⚙️ Gestione Gruppi",
                 create_group_title: "Crea Nuovo Gruppo",
@@ -718,6 +720,20 @@
                 const cacheBustingUrl = '/api/data' + `?_t=${Date.now()}`;
                 const res = await fetch(cacheBustingUrl, { headers: authHeaders() });
                 const data = await res.json();
+
+                // Il token lato server scade dopo 24h. Senza questo controllo, l'header continuava
+                // a mostrare l'utente come "loggato" (stato solo locale) mentre il server, non
+                // riconoscendo più il token, tornava silenziosamente la sola vista pubblica —
+                // l'utente si ritrovava i notebook privati spariti senza nessuna spiegazione.
+                if (loggedUserId && data.isAuth === false) {
+                    sessionStorage.removeItem('joplin_user_id');
+                    sessionStorage.removeItem('joplin_user_email');
+                    sessionStorage.removeItem('joplin_is_admin');
+                    sessionStorage.removeItem('joplin_session_token');
+                    loggedUserId = null; loggedUserEmail = null; isAdmin = false; sessionToken = null;
+                    updateAuthUI();
+                    showToast(t('session_expired_msg'), true);
+                }
 
                 allFolders = data.folders || [];
                 allNotes = data.notes || [];
