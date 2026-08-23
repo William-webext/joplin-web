@@ -91,10 +91,14 @@
         
         .color-circle { width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 
+        /* TOAST NOTIFICATION */
+        #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #2d3238; border: 1px solid var(--border-color); color: white; padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 500; box-shadow: 0 5px 15px rgba(0,0,0,0.5); opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0.3s; z-index: 10000; display: flex; align-items: center; gap: 10px; }
+        #toast.show { opacity: 1; visibility: visible; }
+
         @media print {
             @page { margin: 1.5cm; size: auto; }
             body, html { display: block !important; height: auto !important; margin: 0 !important; padding: 0 !important; background: white !important; color: black !important; overflow: visible !important; }
-            #sidebar, #notes-list, .resizer, .mobile-back-btn, #lightbox, .modal-overlay, #context-menu, .header { display: none !important; }
+            #sidebar, #notes-list, .resizer, .mobile-back-btn, #lightbox, .modal-overlay, #context-menu, #toast, .header { display: none !important; }
             #editor { display: block !important; width: 100% !important; height: auto !important; overflow: visible !important; background: white !important; color: black !important; padding: 0 !important; margin: 0 !important; border: none !important; }
             #editor-content { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
             #editor h1, #editor h2, #editor h3, #editor a, #editor p, #editor li, #editor span, #editor div { color: black !important; }
@@ -120,6 +124,8 @@
     </style>
 </head>
 <body class="view-sidebar">
+
+    <div id="toast"></div>
 
     <div id="context-menu">
         <div class="cm-item" onclick="cmCopyLink()"><span>🔗 Copia Link Diretto</span></div>
@@ -240,7 +246,6 @@
         let currentNoteId = null;
         let expandedFolderIds = new Set();
         
-        // Uso di sessionStorage: la sessione scade alla chiusura della finestra
         let loggedUserId = sessionStorage.getItem('joplin_user_id');
         let isAdmin = sessionStorage.getItem('joplin_is_admin') === 'true';
         let ctxNote = null; 
@@ -255,6 +260,25 @@
             document.addEventListener('click', () => { document.getElementById('context-menu').style.display = 'none'; });
             fetchDataFromServer();
         };
+
+        // GESTIONE TOAST NOTIFICATION
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.innerHTML = '<span>✅</span> ' + message;
+            toast.classList.add('show');
+            setTimeout(() => { toast.classList.remove('show'); }, 3000);
+        }
+
+        // ESPANSIONE AUTOMATICA CARTELLE GENITORE
+        function expandFolderAndParents(folderId) {
+            if (!folderId) return;
+            expandedFolderIds.add(folderId);
+            let current = allFolders.find(f => f.id === folderId);
+            while (current && current.parent_id) {
+                expandedFolderIds.add(current.parent_id);
+                current = allFolders.find(f => f.id === current.parent_id);
+            }
+        }
 
         function initResizers() {
             const sidebar = document.getElementById('sidebar');
@@ -342,7 +366,6 @@
                 const data = await res.json();
                 if(!res.ok) return alert('Errore: ' + data.error);
                 
-                // Salvataggio temporaneo per sicurezza
                 sessionStorage.setItem('joplin_user_id', data.userId); sessionStorage.setItem('joplin_is_admin', data.isAdmin);
                 loggedUserId = data.userId; isAdmin = data.isAdmin; closeLoginModal(); updateAuthUI(); fetchDataFromServer();
             } catch(e) { alert('Errore connessione'); }
@@ -410,7 +433,7 @@
                     if (targetNote) {
                         currentNoteId = targetNote.id;
                         currentFolderId = targetNote.parent_id;
-                        expandedFolderIds.add(currentFolderId);
+                        expandFolderAndParents(currentFolderId);
                     } else {
                         if (!loggedUserId) {
                             document.getElementById('login-msg').innerHTML = '<span style="color:#ff6b6b; font-weight:bold;">Questa nota è privata.</span><br>Effettua l\'accesso per visualizzarla.';
@@ -585,12 +608,16 @@
 
         function cmCopyLink() {
             const link = window.location.origin + window.location.pathname + '?note=' + ctxNote.id;
-            navigator.clipboard.writeText(link).then(() => alert('Link diretto copiato negli appunti!'));
+            navigator.clipboard.writeText(link)
+                .then(() => showToast('Link diretto copiato negli appunti!'))
+                .catch(() => showToast('Errore durante la copia.'));
+            document.getElementById('context-menu').style.display = 'none';
         }
 
         function cmOpenNewTab() {
             const link = window.location.origin + window.location.pathname + '?note=' + ctxNote.id;
             window.open(link, '_blank');
+            document.getElementById('context-menu').style.display = 'none';
         }
 
         function cmHighlight(color) {
@@ -605,16 +632,27 @@
         }
 
         function cmCopyMarkdown() {
-            navigator.clipboard.writeText(ctxNote.body).then(() => alert('Testo Markdown copiato negli appunti!'));
+            navigator.clipboard.writeText(ctxNote.body)
+                .then(() => showToast('Testo Markdown copiato negli appunti!'))
+                .catch(() => showToast('Errore durante la copia.'));
+            document.getElementById('context-menu').style.display = 'none';
         }
 
         function cmPrint() {
             if (currentNoteId !== ctxNote.id) {
                 currentNoteId = ctxNote.id;
+                
+                if (currentFolderId !== ctxNote.parent_id) {
+                    currentFolderId = ctxNote.parent_id;
+                    expandFolderAndParents(currentFolderId);
+                    renderFolderTree();
+                }
+
                 document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
                 renderContent(ctxNote);
                 updateNoteList(); 
             }
+            document.getElementById('context-menu').style.display = 'none';
             setTimeout(() => window.print(), 300);
         }
 
@@ -630,7 +668,6 @@
             
             if (tagVal) filtered = filtered.filter(n => n.tags && n.tags.includes(tagVal));
             
-            // Filtro Evidenziazioni
             if (hlVal) {
                 filtered = filtered.filter(n => {
                     const noteColor = highlightedNotes[n.id];
@@ -682,6 +719,13 @@
                 div.onclick = () => {
                     currentNoteId = note.id;
                     history.replaceState({ panel: 'editor' }, '', '?note=' + note.id);
+                    
+                    if (scopeSelect.value === 'all' && currentFolderId !== note.parent_id) {
+                        currentFolderId = note.parent_id;
+                        expandFolderAndParents(currentFolderId);
+                        renderFolderTree();
+                    }
+
                     document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
                     div.classList.add('active');
                     renderContent(note);
@@ -699,7 +743,7 @@
 
         function renderContent(note) {
             const editorContent = document.getElementById('editor-content');
-            let cleanBody = note.body.replace(/:\/([a-zA-Z0-9]{32})(?:\.[a-zA-Z0-9]+)?/g, '/api/resource/$1');
+            let cleanBody = note.body.replace(/:\/([a-zA-Z0-9]{32})(?:\C+[a-zA-Z0-9]+)?/g, '/api/resource/$1');
             let htmlContent = marked.parse(cleanBody);
             editorContent.innerHTML = `<h1>${note.title}</h1><div>${htmlContent}</div>`;
 
