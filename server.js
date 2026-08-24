@@ -511,6 +511,10 @@ app.get('/api/data', optionalAuth, async (req, res) => {
   const groupsData = getGroupsData();
   const userGroupIds = groupsData.filter(g => g.members && g.members.includes(currentUserEmail)).map(g => g.id);
 
+  // Serve a distinguere, più sotto, le note che l'utente possiede davvero (già in noteIdsSet a
+  // questo punto) da quelle aggiunte solo perché presenti nello snapshot di pubblicazione.
+  const ownedNoteIds = new Set(noteIdsSet);
+
   const visiblePublishedFolders = publishedData.folders.filter(f => {
     if (f.visibility === 'public') return true;
     if (!isAuth) return false;
@@ -531,14 +535,23 @@ app.get('/api/data', optionalAuth, async (req, res) => {
   });
 
   const visiblePublishedFolderIds = visiblePublishedFolders.map(f => f.id);
+  const snapshotPublishedNoteIds = new Set(); // note aggiunte SOLO perché nello snapshot: se la query live sotto non le riconferma, vanno tolte
   publishedData.notes.filter(n => visiblePublishedFolderIds.includes(n.parent_id)).forEach(n => {
     if (!noteIdsSet.has(n.id)) {
       allNotes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.updated_time, tags: ['Pubblicato'] });
       noteIdsSet.add(n.id);
+      snapshotPublishedNoteIds.add(n.id);
     }
   });
 
   if (visiblePublishedFolderIds.length > 0) {
+    // Lo snapshot in SQLite non viene mai invalidato quando una nota viene cancellata o spostata
+    // fuori dal notebook pubblicato in Joplin — senza questo controllo, quella nota resterebbe
+    // visibile come un fantasma nella webapp finché qualcuno non ripubblica esplicitamente il
+    // notebook. La query live sotto conferma quali note dello snapshot esistono ancora davvero
+    // nel notebook pubblicato; quelle non confermate vengono rimosse a fine funzione.
+    const liveConfirmedNoteIds = new Set();
+    let liveQuerySucceeded = false;
     try {
       const dbLiveResult = await pool.query(`SELECT jop_id, jop_parent_id, content FROM items WHERE jop_type = 1`);
       dbLiveResult.rows.forEach(row => {
@@ -547,14 +560,25 @@ app.get('/api/data', optionalAuth, async (req, res) => {
         if (Number(parsed.deleted_time || 0) > 0 || Number(parsed.is_conflict || 0) > 0) return;
         const effParent = row.jop_parent_id || parsed.parent_id || '';
         if (visiblePublishedFolderIds.includes(effParent)) {
+          liveConfirmedNoteIds.add(row.jop_id);
           const freshNote = { id: row.jop_id, parent_id: effParent, title: parsed.title || 'Nuova Nota', body: parsed.body || '', updated_time: Number(parsed.user_updated_time || parsed.updated_time || 0), tags: ['Pubblicato'] };
           const existingIndex = allNotes.findIndex(n => n.id === row.jop_id);
           if (existingIndex >= 0) allNotes[existingIndex] = freshNote;
           else { allNotes.push(freshNote); noteIdsSet.add(row.jop_id); }
         }
       });
+      liveQuerySucceeded = true;
     } catch (err) {
       console.error('/api/data (note pubblicate aggiornate live): errore nella query a Postgres:', err.message);
+    }
+
+    // Solo se la query live è andata a buon fine: senza questa condizione, un errore di Postgres
+    // transitorio farebbe sparire TUTTE le note pubblicate invece di limitarsi a non aggiornarle.
+    if (liveQuerySucceeded) {
+      allNotes = allNotes.filter(n => {
+        const isStaleSnapshotOnly = snapshotPublishedNoteIds.has(n.id) && !ownedNoteIds.has(n.id) && !liveConfirmedNoteIds.has(n.id);
+        return !isStaleSnapshotOnly;
+      });
     }
   }
 
