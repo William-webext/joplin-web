@@ -67,6 +67,10 @@
         .pin-btn { font-size: 12px; margin-right: 6px; opacity: 0; transition: opacity 0.2s; cursor: pointer; }
         .folder-title:hover .pin-btn, .pin-btn.pinned { opacity: 1; filter: grayscale(0%); }
         .pin-btn:not(.pinned) { filter: grayscale(100%) opacity(0.5); }
+        .move-btn-group { display: inline-flex; flex-direction: column; margin-right: 5px; line-height: 0.7; }
+        .move-btn { font-size: 8px; color: var(--text-muted); cursor: pointer; padding: 1px 2px; }
+        .move-btn:hover { color: var(--accent-blue); }
+        .move-btn-disabled { opacity: 0.2; pointer-events: none; }
 
         .sidebar-actions { padding: 10px; padding-bottom: max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 5px; background-color: var(--bg-sidebar); }
         .action-btn { width: 100%; padding: 8px; background: var(--bg-notelist); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; cursor: pointer; font-size: 12px; text-align: center; }
@@ -392,6 +396,8 @@
                 close_lightbox_aria: "Close image",
                 read_only_notice: "👁️ Read-only viewer",
                 exit_zen_title: "Exit Zen Mode",
+                move_up_title: "Move up",
+                move_down_title: "Move down",
                 scope_all: "🌍 Everywhere",
                 scope_current: "📁 Current notebook",
                 sort_recent: "🕒 Most recent",
@@ -471,6 +477,8 @@
                 close_lightbox_aria: "Chiudi immagine",
                 read_only_notice: "👁️ Solo lettura",
                 exit_zen_title: "Esci da Zen Mode",
+                move_up_title: "Sposta su",
+                move_down_title: "Sposta giù",
                 scope_all: "🌍 Ovunque",
                 scope_current: "📁 Taccuino attuale",
                 sort_recent: "🕒 Più recenti",
@@ -1113,6 +1121,29 @@
             renderFolderTree();
         }
 
+        // Sposta un notebook di una posizione su/giù tra i suoi fratelli. Usata sia dai pulsanti
+        // ▲▼ (alternativa accessibile al drag, utile su mobile dove il drag nativo non funziona e
+        // per chi non usa il mouse) sia, indirettamente, dalla stessa logica di persistenza del
+        // drag-and-drop. isFavorites distingue se il livello è la sezione Preferiti (riordina
+        // pinnedFolders) o l'albero principale (riordina folderOrder per quel genitore).
+        function moveFolderInOrder(folderId, parentKey, siblingIds, isFavorites, direction) {
+            const ids = [...siblingIds];
+            const idx = ids.indexOf(folderId);
+            if (idx === -1) return;
+            const newIdx = idx + direction;
+            if (newIdx < 0 || newIdx >= ids.length) return; // già al primo/ultimo posto: nessun avvolgimento
+
+            [ids[idx], ids[newIdx]] = [ids[newIdx], ids[idx]];
+
+            if (isFavorites) {
+                pinnedFolders = ids;
+            } else {
+                folderOrder[parentKey] = ids;
+            }
+            savePreferences();
+            renderFolderTree();
+        }
+
         function renderFolderTree() {
             const container = document.getElementById('folders-container');
             container.innerHTML = '';
@@ -1148,13 +1179,15 @@
                 savePreferences();
             }
 
-            // Il drag-and-drop riordina solo tra fratelli dello stesso genitore (stesso parentKey):
-            // trascinare da un altro livello non ha effetto, per non rompere la gerarchia.
-            function attachDragHandlers(titleDiv, folder, parentKey, siblings) {
+            // Il drag-and-drop riordina solo tra fratelli dello stesso genitore/sezione: trascinare
+            // da un altro livello, o dall'albero principale ai Preferiti (e viceversa), non ha
+            // effetto — evita di rompere la gerarchia o mescolare i due meccanismi di ordinamento.
+            function attachDragHandlers(titleDiv, folder, parentKey, siblings, isFavorites) {
                 titleDiv.draggable = true;
                 titleDiv.addEventListener('dragstart', (e) => {
                     e.stopPropagation();
                     e.dataTransfer.setData('text/plain', folder.id);
+                    e.dataTransfer.setData('application/x-favorites', isFavorites ? '1' : '0');
                     e.dataTransfer.effectAllowed = 'move';
                     titleDiv.classList.add('dragging');
                 });
@@ -1170,7 +1203,9 @@
                     e.stopPropagation();
                     titleDiv.classList.remove('drag-over');
                     const draggedId = e.dataTransfer.getData('text/plain');
+                    const draggedFromFavorites = e.dataTransfer.getData('application/x-favorites') === '1';
                     if (!draggedId || draggedId === folder.id) return;
+                    if (draggedFromFavorites !== isFavorites) return; // niente mix tra Preferiti e albero principale
 
                     const currentIds = siblings.map(f => f.id);
                     const fromIdx = currentIds.indexOf(draggedId);
@@ -1179,12 +1214,18 @@
 
                     currentIds.splice(fromIdx, 1);
                     currentIds.splice(toIdx, 0, draggedId);
-                    persistFolderOrder(parentKey, currentIds);
+
+                    if (isFavorites) {
+                        pinnedFolders = currentIds;
+                        savePreferences();
+                    } else {
+                        persistFolderOrder(parentKey, currentIds);
+                    }
                     renderFolderTree();
                 });
             }
 
-            function createFolderHTML(folder, parentKey, siblings, forceOpen = false) {
+            function createFolderHTML(folder, parentKey, siblings, isFavorites = false) {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'folder-item';
                 
@@ -1193,29 +1234,46 @@
                 if (currentFolderId === folder.id) titleDiv.classList.add('active');
 
                 const hasChildren = folder.children && folder.children.length > 0;
-                const isExpanded = forceOpen || expandedFolderIds.has(folder.id);
+                const isExpanded = isFavorites || expandedFolderIds.has(folder.id);
                 const isPinned = pinnedFolders.includes(folder.id);
                 const noteCount = getRecursiveNoteCount(folder.id);
 
                 const countBadge = `<span style="font-size:11px; color: var(--text-muted); margin-left: auto; padding-left: 8px;">${noteCount}</span>`;
                 const pinTitle = isPinned ? t('unpin_title') : t('pin_title');
                 const pinHtml = `<span class="pin-btn ${isPinned ? 'pinned' : ''}" onclick="togglePin(event, '${folder.id}')" title="${escapeHtml(pinTitle)}" aria-label="${escapeHtml(pinTitle)}" role="button">📌</span>`;
+
+                // Frecce su/giù: alternativa accessibile al drag-and-drop (tastiera, touch su mobile
+                // dove il drag nativo non funziona). Disabilitate visivamente ai bordi della lista,
+                // dove spostare oltre non avrebbe effetto.
+                const siblingIds = siblings.map(s => s.id);
+                const posIdx = siblingIds.indexOf(folder.id);
+                const isFirst = posIdx <= 0;
+                const isLast = posIdx === -1 || posIdx === siblingIds.length - 1;
+                const moveUpLabel = escapeHtml(t('move_up_title'));
+                const moveDownLabel = escapeHtml(t('move_down_title'));
+                const moveHtml = `<span class="move-btn-group"><span class="move-btn move-up ${isFirst ? 'move-btn-disabled' : ''}" title="${moveUpLabel}" aria-label="${moveUpLabel}" role="button">▲</span><span class="move-btn move-down ${isLast ? 'move-btn-disabled' : ''}" title="${moveDownLabel}" aria-label="${moveDownLabel}" role="button">▼</span></span>`;
+
                 const arrowLabel = escapeHtml(isExpanded ? t('collapse_folder_title') : t('expand_folder_title'));
                 const arrow = hasChildren ? `<span class="toggle-arrow ${isExpanded ? 'open' : ''}" title="${arrowLabel}" aria-label="${arrowLabel}" role="button">▶</span>` : `<span class="toggle-arrow" style="visibility:hidden;">▶</span>`;
                 const icon = folder.icon ? `<span style="margin-right: 8px;">${folder.icon}</span>` : `<span style="margin-right: 8px;">📁</span>`;
                 
                 const safeFolderTitle = escapeHtml(resolveDisplayTitle(folder.title));
-                if(forceOpen) {
-                    titleDiv.innerHTML = `${pinHtml}<span style="visibility:hidden; width:20px; display:inline-block;"></span>${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeFolderTitle}</span>${countBadge}`;
+                if(isFavorites) {
+                    titleDiv.innerHTML = `${pinHtml}${moveHtml}<span style="visibility:hidden; width:20px; display:inline-block;"></span>${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeFolderTitle}</span>${countBadge}`;
                 } else {
-                    titleDiv.innerHTML = `${pinHtml}${arrow}${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeFolderTitle}</span>${countBadge}`;
+                    titleDiv.innerHTML = `${pinHtml}${moveHtml}${arrow}${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeFolderTitle}</span>${countBadge}`;
                 }
+
+                const moveUpBtn = titleDiv.querySelector('.move-up');
+                const moveDownBtn = titleDiv.querySelector('.move-down');
+                if (moveUpBtn && !isFirst) moveUpBtn.onclick = (e) => { e.stopPropagation(); moveFolderInOrder(folder.id, parentKey, siblingIds, isFavorites, -1); };
+                if (moveDownBtn && !isLast) moveDownBtn.onclick = (e) => { e.stopPropagation(); moveFolderInOrder(folder.id, parentKey, siblingIds, isFavorites, 1); };
                 
                 const childrenContainer = document.createElement('div');
                 childrenContainer.className = 'children-container';
                 childrenContainer.style.display = isExpanded ? 'block' : 'none';
 
-                if (!forceOpen && hasChildren) {
+                if (!isFavorites && hasChildren) {
                     const arrowSpan = titleDiv.querySelector('.toggle-arrow');
                     if (arrowSpan) {
                         arrowSpan.onclick = (e) => {
@@ -1246,14 +1304,12 @@
                     updateTagDropdown(); updateNoteList(); showPanel('notes', true);
                 };
 
-                // Il drag-and-drop riordina solo la vista principale dell'albero, non la sezione
-                // preferiti (lì l'ordine è già quello di pinnedFolders, gestito a parte).
-                if (!forceOpen) {
-                    attachDragHandlers(titleDiv, folder, parentKey, siblings);
-                }
+                // Il drag-and-drop ora copre sia l'albero principale sia i Preferiti (isFavorites
+                // distingue quale meccanismo di persistenza usare al drop).
+                attachDragHandlers(titleDiv, folder, parentKey, siblings, isFavorites);
 
                 wrapper.appendChild(titleDiv);
-                if (!forceOpen && hasChildren) {
+                if (!isFavorites && hasChildren) {
                     const orderedChildren = orderFolders(folder.children, folder.id);
                     orderedChildren.forEach(child => childrenContainer.appendChild(createFolderHTML(child, folder.id, orderedChildren)));
                     wrapper.appendChild(childrenContainer);
@@ -1267,10 +1323,8 @@
                 favHeader.innerText = t('favorites_title');
                 container.appendChild(favHeader);
 
-                pinnedFolders.forEach(fid => {
-                    const f = allFolders.find(fold => fold.id === fid);
-                    if (f) container.appendChild(createFolderHTML(f, 'root', [], true));
-                });
+                const pinnedFolderObjs = pinnedFolders.map(fid => allFolders.find(fold => fold.id === fid)).filter(Boolean);
+                pinnedFolderObjs.forEach(f => container.appendChild(createFolderHTML(f, 'root', pinnedFolderObjs, true)));
 
                 const sep = document.createElement('div');
                 sep.style.cssText = 'height: 1px; background: var(--border-color); margin: 10px 0;';
