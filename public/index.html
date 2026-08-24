@@ -213,7 +213,7 @@
                 <p id="login-msg" style="font-size: 12px; color: var(--text-muted); margin-bottom: 15px;" data-i18n="login_desc">Session will expire when browser is closed.</p>
                 <input type="email" id="emailInput" class="login-input" placeholder="Email" required>
                 <input type="password" id="passwordInput" class="login-input" placeholder="Password" required>
-                <button type="submit" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 10px;" data-i18n="login_btn">Login</button>
+                <button type="submit" id="loginSubmitBtn" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 10px;" data-i18n="login_btn">Login</button>
                 <button type="button" class="action-btn" style="margin-top:5px;" onclick="closeLoginModal()" data-i18n="cancel_btn">Cancel</button>
             </form>
         </div>
@@ -241,7 +241,7 @@
             <span data-i18n="notebooks_title">📓 Notebooks</span>
             <span id="auth-status" style="font-size:10px; color:var(--accent-blue); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title=""></span>
         </div>
-        <div id="folders-container" class="list-container"></div>
+        <div id="folders-container" class="list-container"><div style="padding:15px; color:var(--text-muted); font-size: 13px;" data-i18n="loading_notebooks_msg">⏳ Loading notebooks...</div></div>
         <div class="sidebar-actions">
             <button class="action-btn" onclick="fetchDataFromServer()" data-i18n="refresh_btn">🔄 Refresh</button>
             <button id="admin-btn" class="action-btn" style="display:none;" onclick="openGroupsModal()" data-i18n="groups_btn">⚙️ Groups</button>
@@ -393,8 +393,11 @@
                 note_not_found: "Note not found or permission denied.",
                 code_copy: "📋 Copy",
                 refreshing: "⏳ Refreshing...",
+                loading_notebooks_msg: "Loading notebooks...",
                 err_enter_group_name: "Please enter a group name",
-                conn_error: "Connection Error"
+                conn_error: "Connection Error",
+                login_timeout_msg: "The server is taking too long to respond. Please try again.",
+                logging_in_msg: "⏳ Logging in..."
             },
             it: {
                 notebooks_title: "📓 Taccuini",
@@ -454,8 +457,11 @@
                 note_not_found: "Nota non trovata o non possiedi i permessi per visualizzarla.",
                 code_copy: "📋 Copy",
                 refreshing: "⏳ Aggiornamento...",
+                loading_notebooks_msg: "Caricamento notebook...",
                 err_enter_group_name: "Inserisci un nome per il gruppo",
-                conn_error: "Errore di connessione"
+                conn_error: "Errore di connessione",
+                login_timeout_msg: "Il server sta impiegando troppo tempo a rispondere. Riprova.",
+                logging_in_msg: "⏳ Accesso in corso..."
             }
         };
 
@@ -674,7 +680,7 @@
                 document.body.classList.remove('zen-mode');
                 history.replaceState({}, '', window.location.pathname);
 
-                document.getElementById('folders-container').innerHTML = '';
+                document.getElementById('folders-container').innerHTML = `<div style="padding:15px; color:var(--text-muted); font-size: 13px;" data-i18n="loading_notebooks_msg">${t('loading_notebooks_msg')}</div>`;
                 document.getElementById('notes-container').innerHTML = `<div style="padding:15px; color:var(--text-muted); font-size: 13px;" data-i18n="select_notebook_prompt">${t('select_notebook_prompt')}</div>`;
                 document.getElementById('editor-content').innerHTML = `<div style="color: var(--text-muted); text-align: center; margin-top: 20vh; font-size: 18px;" data-i18n="select_note_prompt">${t('select_note_prompt')}</div>`;
 
@@ -695,8 +701,26 @@
         async function performLogin() {
             const email = document.getElementById('emailInput').value.trim();
             const password = document.getElementById('passwordInput').value.trim();
+            const submitBtn = document.getElementById('loginSubmitBtn');
+            const originalBtnText = submitBtn.innerText;
+
+            // Senza timeout, un server raggiungibile ma bloccato (es. un DB in stallo) lascia la
+            // fetch appesa a tempo indeterminato: nessun errore, nessun feedback, il pulsante resta
+            // lì senza dire all'utente se sta ancora provando o è bloccato.
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+            submitBtn.disabled = true;
+            submitBtn.innerText = t('logging_in_msg');
+
             try {
-                const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password }),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
                 const data = await res.json();
                 if(!res.ok) return showToast(data.error || 'Login Error', true);
                 
@@ -705,7 +729,16 @@
                 sessionStorage.setItem('joplin_is_admin', data.isAdmin);
                 sessionStorage.setItem('joplin_session_token', data.token);
                 loggedUserId = data.userId; loggedUserEmail = email; isAdmin = data.isAdmin; sessionToken = data.token; closeLoginModal(); updateAuthUI(); fetchDataFromServer();
-            } catch(e) { showToast(t('conn_error'), true); }
+            } catch(e) {
+                clearTimeout(timeoutId);
+                // AbortError = è scattato il nostro timeout (server raggiunto ma non risponde in tempo);
+                // qualunque altro errore qui è una fetch fallita subito (server irraggiungibile, DNS, tunnel giù).
+                // Messaggio diverso perché indicano problemi diversi da diagnosticare.
+                showToast(e.name === 'AbortError' ? t('login_timeout_msg') : t('conn_error'), true);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerText = originalBtnText;
+            }
         }
 
         async function fetchPreferences() {
