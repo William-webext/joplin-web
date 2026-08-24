@@ -95,12 +95,24 @@ function createSession(userId, email, isAdmin) {
 
 function getSession(token) {
   if (!token) return null;
-  const row = sqliteDb.prepare('SELECT user_id, email, is_admin, expires_at FROM sessions WHERE token_hash = ?').get(hashToken(token));
+  const tokenHash = hashToken(token);
+  const row = sqliteDb.prepare('SELECT user_id, email, is_admin, expires_at FROM sessions WHERE token_hash = ?').get(tokenHash);
   if (!row) return null;
-  if (row.expires_at < Date.now()) {
-    sqliteDb.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+
+  const now = Date.now();
+  if (row.expires_at < now) {
+    sqliteDb.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
     return null;
   }
+
+  // Sessione scorrevole: senza questo, un utente attivo viene buttato fuori a metà lavoro appena
+  // passano 24h dal login, indipendentemente da quanto sta usando l'app in quel momento. Si rinnova
+  // solo quando resta meno della metà del TTL (non ad ogni richiesta), così un utente attivo scrive
+  // sul DB per il rinnovo al massimo un paio di volte al giorno, non ad ogni singola chiamata API.
+  if (row.expires_at - now < SESSION_TTL_MS / 2) {
+    sqliteDb.prepare('UPDATE sessions SET expires_at = ? WHERE token_hash = ?').run(now + SESSION_TTL_MS, tokenHash);
+  }
+
   return { userId: row.user_id, email: row.email, isAdmin: !!row.is_admin };
 }
 
