@@ -119,6 +119,10 @@
 
         #editor-content { padding: 40px; max-width: 900px; margin: 0 auto; width: 100%; box-sizing: border-box; }
         #editor h1 { font-size: 1.8em; margin-bottom: 0.5em; color: var(--text-main); }
+        #note-breadcrumb { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+        .breadcrumb-segment { cursor: pointer; }
+        .breadcrumb-segment:hover { color: var(--accent-blue); text-decoration: underline; }
+        .breadcrumb-sep { color: var(--text-muted); opacity: 0.5; }
         #editor h2, #editor h3 { color: var(--accent-blue); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 30px; }
         #editor a { color: var(--accent-blue); text-decoration: none; }
         #editor img { max-width: 100%; border-radius: 4px; cursor: zoom-in; }
@@ -649,7 +653,34 @@
                 document.getElementById('context-menu').style.display = 'none'; 
             });
             document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') closeLightbox();
+                if (e.key === 'Escape') {
+                    closeLightbox();
+                    const loginModal = document.getElementById('login-modal');
+                    if (loginModal && loginModal.style.display === 'flex') closeLoginModal();
+                    const groupsModal = document.getElementById('groups-modal');
+                    if (groupsModal && groupsModal.style.display === 'flex') cancelGroupsModal();
+                    document.getElementById('context-menu').style.display = 'none';
+                    document.getElementById('toc-menu').style.display = 'none';
+                    return;
+                }
+
+                // Le scorciatoie sotto non devono attivarsi mentre si sta scrivendo in un campo
+                const tag = (e.target.tagName || '').toLowerCase();
+                const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+
+                if (e.key === '/' && !isTyping) {
+                    e.preventDefault();
+                    const searchInput = document.getElementById('searchInput');
+                    if (searchInput) searchInput.focus();
+                    return;
+                }
+
+                if (isTyping) return;
+
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    navigateNoteList(e.key === 'ArrowDown' ? 1 : -1);
+                }
             });
             fetchDataFromServer();
 
@@ -1501,6 +1532,57 @@
             setTimeout(() => window.print(), 300);
         }
 
+        // Naviga a un notebook specifico (usata dal breadcrumb): stessa logica del click su una
+        // cartella in sidebar, così cliccare un segmento del percorso si comporta in modo coerente.
+        // Scorre la nota attiva nella lista con le frecce, tra quelle attualmente visibili in DOM
+        // (già filtrate/ordinate da updateNoteList) — riusa il click handler già assegnato ad ogni
+        // elemento invece di duplicarne la logica di apertura.
+        function navigateNoteList(direction) {
+            const items = Array.from(document.querySelectorAll('#notes-container .note-item'));
+            if (items.length === 0) return;
+
+            const activeIndex = items.findIndex(el => el.classList.contains('active'));
+            let nextIndex;
+            if (activeIndex === -1) {
+                nextIndex = direction > 0 ? 0 : items.length - 1;
+            } else {
+                nextIndex = activeIndex + direction;
+                if (nextIndex < 0 || nextIndex >= items.length) return; // già al primo/ultimo: non avvolge
+            }
+
+            items[nextIndex].click();
+            items[nextIndex].scrollIntoView({ block: 'nearest' });
+        }
+
+        function navigateToFolder(folderId) {
+            currentFolderId = folderId;
+            const scopeSelect = document.getElementById('scopeSelect');
+            if (scopeSelect) scopeSelect.value = 'current';
+            const searchInput = document.getElementById('searchInput');
+            const searchWrap = document.getElementById('searchInputWrap');
+            if (searchInput) searchInput.value = '';
+            if (searchWrap) searchWrap.classList.remove('has-text');
+            expandFolderAndParents(folderId);
+            renderFolderTree();
+            updateTagDropdown();
+            updateNoteList();
+            showPanel('notes', true);
+        }
+
+        // Percorso cartelle dal root fino al genitore diretto della nota, per il breadcrumb.
+        // Protezione da cicli come già fatto lato server per lo stesso tipo di dato.
+        function getFolderBreadcrumb(parentId) {
+            const path = [];
+            const visited = new Set();
+            let current = allFolders.find(f => f.id === parentId);
+            while (current && !visited.has(current.id)) {
+                visited.add(current.id);
+                path.unshift(current);
+                current = current.parent_id ? allFolders.find(f => f.id === current.parent_id) : null;
+            }
+            return path;
+        }
+
         function renderContent(note) {
             const editorContent = document.getElementById('editor-content');
             
@@ -1510,7 +1592,20 @@
 
             const displayTitle = escapeHtml(getNoteDisplayTitle(note));
 
-            editorContent.innerHTML = `<h1>${displayTitle}</h1><div id="md-rendered-body">${htmlContent}</div>`;
+            const breadcrumbFolders = getFolderBreadcrumb(note.parent_id);
+            let breadcrumbHtml = '';
+            if (breadcrumbFolders.length > 0) {
+                const segments = breadcrumbFolders.map(f =>
+                    `<span class="breadcrumb-segment" data-folder-id="${escapeHtml(f.id)}">${escapeHtml(resolveDisplayTitle(f.title))}</span>`
+                ).join('<span class="breadcrumb-sep">›</span>');
+                breadcrumbHtml = `<div id="note-breadcrumb">${segments}</div>`;
+            }
+
+            editorContent.innerHTML = `${breadcrumbHtml}<h1>${displayTitle}</h1><div id="md-rendered-body">${htmlContent}</div>`;
+
+            editorContent.querySelectorAll('.breadcrumb-segment').forEach(el => {
+                el.onclick = () => navigateToFolder(el.getAttribute('data-folder-id'));
+            });
 
             editorContent.querySelectorAll('img').forEach(img => {
                 img.onclick = function() { openLightbox(this.src); };
