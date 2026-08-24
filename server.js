@@ -50,6 +50,11 @@ sqliteDb.exec(`
     members TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS groups_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    version INTEGER NOT NULL DEFAULT 0
+  );
+
   CREATE TABLE IF NOT EXISTS published_folders (
     id TEXT PRIMARY KEY,
     parent_id TEXT,
@@ -246,9 +251,25 @@ function getGroupsData() {
   }
 }
 
+// Senza un contatore di versione, due admin con il pannello gruppi aperto contemporaneamente
+// possono perdersi a vicenda le modifiche: chi salva per ultimo sovrascrive per intero l'elenco,
+// cancellando in silenzio quello che l'altro aveva appena aggiunto. Il client deve dichiarare la
+// versione che aveva caricato; se nel frattempo è cambiata, il salvataggio viene rifiutato invece
+// di procedere alla cieca.
+function getGroupsVersion() {
+  const row = sqliteDb.prepare('SELECT version FROM groups_meta WHERE id = 1').get();
+  if (row) return row.version;
+  sqliteDb.prepare('INSERT INTO groups_meta (id, version) VALUES (1, 0)').run();
+  return 0;
+}
+
 function saveGroupsData(groups) {
   const deleteStmt = sqliteDb.prepare('DELETE FROM groups');
   const insertStmt = sqliteDb.prepare('INSERT INTO groups (id, name, members) VALUES (?, ?, ?)');
+  const bumpVersionStmt = sqliteDb.prepare(`
+    INSERT INTO groups_meta (id, version) VALUES (1, 1)
+    ON CONFLICT(id) DO UPDATE SET version = version + 1
+  `);
 
   const transaction = sqliteDb.transaction((groupList) => {
     deleteStmt.run();
@@ -259,9 +280,11 @@ function saveGroupsData(groups) {
         JSON.stringify(g.members || [])
       );
     }
+    bumpVersionStmt.run();
   });
 
   transaction(groups || []);
+  return getGroupsVersion();
 }
 
 // 3. CONNESSIONE POSTGRESQL (JOPLIN CORE)
@@ -419,14 +442,23 @@ app.post('/api/preferences', requireAuth, (req, res) => {
 app.get('/api/users-and-groups', requireAuth, async (req, res) => {
   try {
     const userRes = await pool.query('SELECT id, email, is_admin FROM users ORDER BY email ASC');
-    res.json({ users: userRes.rows, groups: getGroupsData() });
+    res.json({ users: userRes.rows, groups: getGroupsData(), groupsVersion: getGroupsVersion() });
   } catch (err) { res.status(500).json({ error: 'Errore lettura utenti/gruppi' }); }
 });
 
 app.post('/api/admin/groups', requireAuth, requireAdmin, async (req, res) => {
   if (!Array.isArray(req.body.groups)) return res.status(400).json({ error: 'Dati non validi' });
-  saveGroupsData(req.body.groups);
-  res.json({ success: true });
+
+  const expectedVersion = req.body.expectedVersion;
+  const currentVersion = getGroupsVersion();
+  if (typeof expectedVersion === 'number' && expectedVersion !== currentVersion) {
+    // Qualcun altro ha salvato i gruppi nel frattempo: procedere sovrascriverebbe le sue modifiche
+    // in silenzio. Si rifiuta il salvataggio e si chiede al client di ricaricare.
+    return res.status(409).json({ error: 'I gruppi sono stati modificati da qualcun altro nel frattempo. Ricarica e riprova.', currentVersion });
+  }
+
+  const newVersion = saveGroupsData(req.body.groups);
+  res.json({ success: true, groupsVersion: newVersion });
 });
 
 app.get('/api/published-list', requireAuth, (req, res) => {
