@@ -113,7 +113,9 @@
         .search-input-wrap.has-text .search-clear-btn { display: block; }
         .search-select-field { width: 100%; box-sizing: border-box; padding: 6px; background-color: var(--bg-editor); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; font-size: 11px; outline: none; cursor: pointer; }
 
-        .editor-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 20px; border-bottom: 1px solid var(--border-color); background-color: var(--bg-sidebar); }
+        .editor-toolbar { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 8px 20px; border-bottom: 1px solid var(--border-color); background-color: var(--bg-sidebar); }
+        .donate-btn { background: #ffc439; color: #1a1a1a; border: none; border-radius: 4px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
+        .donate-btn:hover { background: #ffb700; }
         .tb-btn { background: transparent; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 5px; }
         .tb-btn:hover { background-color: var(--hover-bg); }
 
@@ -217,6 +219,7 @@
             .modal-card { width: 90% !important; padding: 15px !important; }
             #editor-content { padding: 20px !important; }
             #editor h1 { font-size: 1.5em !important; }
+            .editor-toolbar { display: flex !important; flex-wrap: wrap; justify-content: center !important; row-gap: 6px; }
         }
     </style>
 </head>
@@ -269,6 +272,28 @@
             <input type="text" id="newGroupName" class="login-input" data-i18n-ph="group_name_ph" placeholder="Group Name" oninput="updateGroupModalButton()">
             <button id="group-action-btn" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="handleGroupAction()">OK</button>
             <button class="action-btn" style="margin-top: 10px;" onclick="cancelGroupsModal()" data-i18n="cancel_btn">Annulla</button>
+        </div>
+    </div>
+
+    <div id="about-modal" class="modal-overlay">
+        <div class="modal-card" style="width: 480px;">
+            <h3 style="margin-top:0; color:var(--text-main);" data-i18n="about_title">ℹ️ About this project</h3>
+            <p style="color:var(--text-main); font-size: 13px; line-height:1.6;" data-i18n="about_description">
+                A read-only web viewer for your self-hosted Joplin notes — access your notebooks from any browser, on any device, without installing anything or leaving data behind after you close the tab.
+            </p>
+            <p style="color:var(--text-main); font-size: 13px; line-height:1.6;" data-i18n="about_donation_pitch">
+                This project is free and open source, built and maintained in spare time. If it's useful to you, consider supporting its development — every contribution helps keep it going.
+            </p>
+            <div style="text-align:center; margin: 15px 0;">
+                <a class="donate-btn" style="font-size: 14px; padding: 8px 20px;" href="https://paypal.me/webext" target="_blank" rel="noopener noreferrer" data-i18n="donate_btn">☕ Support this project</a>
+            </div>
+            <hr style="border-color: var(--border-color); margin: 18px 0;">
+            <h4 style="color:var(--text-main); margin-bottom: 5px;" data-i18n="support_title">🐛 Report a problem / Ask for help</h4>
+            <p style="color:var(--text-muted); font-size: 12px; margin-top:0;" data-i18n="support_description">Your message goes straight to the maintainer. Leave your email if you'd like a reply.</p>
+            <input type="email" id="contactReplyTo" class="login-input" data-i18n-ph="contact_email_ph" placeholder="Your email (optional)">
+            <textarea id="contactMessage" class="login-input" style="min-height: 90px; resize: vertical; font-family: inherit;" data-i18n-ph="contact_message_ph" placeholder="Describe the problem or your question..."></textarea>
+            <button id="contactSubmitBtn" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="submitContactForm()" data-i18n="contact_submit_btn">Send message</button>
+            <button class="action-btn" style="margin-top: 10px;" onclick="closeAboutModal()" data-i18n="cancel_btn">Annulla</button>
         </div>
     </div>
 
@@ -341,12 +366,16 @@
                 <button id="toc-btn" class="tb-btn" style="display:none;" onclick="toggleTOC()" title="Table of Contents" data-i18n="toc_btn">📜 TOC</button>
                 <button id="width-toggle-btn" class="tb-btn" onclick="toggleReadingWidth()"></button>
             </div>
+            <div style="display:flex; justify-content:center;">
+                <a class="donate-btn" href="https://paypal.me/webext" target="_blank" rel="noopener noreferrer" data-i18n="donate_btn">☕ Support this project</a>
+            </div>
             <div style="display:flex; gap:8px;">
                 <select id="langSelect" class="tb-btn" style="outline:none;" onchange="changeLanguage(this.value)">
                     <option value="en">🌐 EN</option>
                     <option value="it">🌐 IT</option>
                 </select>
                 <button class="tb-btn" onclick="toggleTheme()" title="Toggle Theme" data-i18n="theme_btn">☀️/🌙 Theme</button>
+                <button class="tb-btn" onclick="openAboutModal()" data-i18n="about_btn">ℹ️ About</button>
             </div>
         </div>
         
@@ -405,6 +434,17 @@
                 move_down_title: "Move down",
                 width_full_btn: "↔️ Full Width",
                 width_comfortable_btn: "↔️ Comfortable",
+                donate_btn: "☕ Support this project",
+                about_btn: "ℹ️ About",
+                about_title: "ℹ️ About this project",
+                about_description: "A read-only web viewer for your self-hosted Joplin notes — access your notebooks from any browser, on any device, without installing anything or leaving data behind after you close the tab.",
+                about_donation_pitch: "This project is free and open source, built and maintained in spare time. If it's useful to you, consider supporting its development — every contribution helps keep it going.",
+                support_title: "🐛 Report a problem / Ask for help",
+                support_description: "This opens your email app with the message ready to send.",
+                contact_email_ph: "Your email (optional)",
+                contact_message_ph: "Describe the problem or your question...",
+                contact_submit_btn: "Send message",
+                contact_empty_error: "Please write a message first.",
                 scope_all: "🌍 Everywhere",
                 scope_current: "📁 Current notebook",
                 sort_recent: "🕒 Most recent",
@@ -488,6 +528,17 @@
                 move_down_title: "Sposta giù",
                 width_full_btn: "↔️ Larghezza piena",
                 width_comfortable_btn: "↔️ Comoda",
+                donate_btn: "☕ Sostieni il progetto",
+                about_btn: "ℹ️ Info",
+                about_title: "ℹ️ Informazioni sul progetto",
+                about_description: "Un visualizzatore web in sola lettura per le tue note Joplin self-hosted — accedi ai tuoi notebook da qualsiasi browser, su qualsiasi dispositivo, senza installare nulla e senza lasciare dati dopo aver chiuso la scheda.",
+                about_donation_pitch: "Questo progetto è gratuito e open source, sviluppato e mantenuto nel tempo libero. Se ti è utile, considera di sostenerne lo sviluppo — ogni contributo aiuta a mantenerlo attivo.",
+                support_title: "🐛 Segnala un problema / Chiedi aiuto",
+                support_description: "Si apre il tuo client di posta con il messaggio già pronto da inviare.",
+                contact_email_ph: "La tua email (facoltativa)",
+                contact_message_ph: "Descrivi il problema o la tua domanda...",
+                contact_submit_btn: "Invia messaggio",
+                contact_empty_error: "Scrivi prima un messaggio.",
                 scope_all: "🌍 Ovunque",
                 scope_current: "📁 Taccuino attuale",
                 sort_recent: "🕒 Più recenti",
@@ -678,6 +729,8 @@
                     if (loginModal && loginModal.style.display === 'flex') closeLoginModal();
                     const groupsModal = document.getElementById('groups-modal');
                     if (groupsModal && groupsModal.style.display === 'flex') cancelGroupsModal();
+                    const aboutModal = document.getElementById('about-modal');
+                    if (aboutModal && aboutModal.style.display === 'flex') closeAboutModal();
                     document.getElementById('context-menu').style.display = 'none';
                     document.getElementById('toc-menu').style.display = 'none';
                     return;
@@ -904,6 +957,38 @@
             }
         }
         function closeLoginModal() { document.getElementById('login-modal').style.display = 'none'; }
+
+        function openAboutModal() {
+            document.getElementById('about-modal').style.display = 'flex';
+        }
+
+        function closeAboutModal() {
+            document.getElementById('about-modal').style.display = 'none';
+        }
+
+        function submitContactForm() {
+            const messageInput = document.getElementById('contactMessage');
+            const replyToInput = document.getElementById('contactReplyTo');
+            const message = messageInput.value.trim();
+
+            if (!message) { showToast(t('contact_empty_error'), true); return; }
+
+            // Indirizzo assemblato qui invece che scritto in chiaro nel markup HTML: non ferma chi
+            // ispeziona attivamente il codice, ma evita che compaia leggibile nel sorgente della
+            // pagina per i bot che raschiano il testo cercando indirizzi email.
+            const to = ['joplin', 'rossodivino.com'].join('@');
+            const subject = 'Joplin Web Portal - Support request';
+            let body = message;
+            if (replyToInput.value.trim()) {
+                body += '\n\n— Reply to: ' + replyToInput.value.trim();
+            }
+
+            window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+            messageInput.value = '';
+            replyToInput.value = '';
+            closeAboutModal();
+        }
 
         async function performLogin() {
             const email = document.getElementById('emailInput').value.trim();
