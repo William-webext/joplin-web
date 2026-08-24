@@ -1184,11 +1184,17 @@
             }
 
             if (query) {
+                // Prima era un substring semplice: "riunione lunedì" trovava solo note con quella
+                // identica sequenza di caratteri. Ora ogni parola della ricerca deve comparire da
+                // qualche parte nel testo (titolo, corpo o tag), in qualsiasi ordine e posizione —
+                // "lunedì riunione" o "riunione team lunedì" matchano comunque la stessa nota.
+                const queryWords = query.split(/\s+/).filter(w => w.length > 0);
                 filtered = filtered.filter(n => {
-                    const cleanTitle = getCleanTitle(n.title);
-                    return (cleanTitle && cleanTitle.toLowerCase().includes(query)) ||
-                           (n.body && n.body.toLowerCase().includes(query)) || 
-                           (n.tags && n.tags.some(t => t.toLowerCase().includes(query)));
+                    const cleanTitle = getCleanTitle(n.title).toLowerCase();
+                    const bodyText = (n.body || '').toLowerCase();
+                    const tagsText = (n.tags || []).join(' ').toLowerCase();
+                    const haystack = cleanTitle + ' ' + bodyText + ' ' + tagsText;
+                    return queryWords.every(w => haystack.includes(w));
                 });
             }
 
