@@ -136,6 +136,36 @@
 
         .mobile-back-btn { display: none; background: var(--bg-sidebar); color: var(--accent-blue); border: none; border-bottom: 1px solid var(--border-color); padding: 15px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: left; width: 100%; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
 
+        #update-banner {
+            display: none;
+            position: fixed;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 200;
+            background: var(--accent-blue, #0e639c);
+            color: white;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+            display: none;
+            align-items: center;
+            gap: 12px;
+        }
+        #update-banner.visible { display: flex; }
+        #update-banner button {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #update-banner button:hover { background: rgba(255,255,255,0.32); }
+
         @media (max-width: 768px) {
             .resizer { display: none !important; }
             #sidebar, #notes-list, #editor { width: 100% !important; min-width: 100% !important; height: 100vh !important; display: none !important; }
@@ -146,6 +176,7 @@
             .modal-card { width: 90% !important; padding: 15px !important; }
             #editor-content { padding: 20px !important; }
             #editor h1 { font-size: 1.5em !important; }
+            #update-banner { bottom: 10px; width: 90%; justify-content: space-between; }
         }
     </style>
 </head>
@@ -198,6 +229,11 @@
             <button id="group-action-btn" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="handleGroupAction()">OK</button>
             <button class="action-btn" style="margin-top: 10px;" onclick="cancelGroupsModal()" data-i18n="cancel_btn">Annulla</button>
         </div>
+    </div>
+
+    <div id="update-banner">
+        <span data-i18n="update_available_msg">New content is available.</span>
+        <button onclick="applyPendingUpdate()" data-i18n="update_refresh_btn">Refresh</button>
     </div>
 
     <div id="sidebar">
@@ -343,6 +379,8 @@
                 login_desc: "Session will expire when browser is closed.",
                 login_private_msg: "<span style='color:#ff6b6b; font-weight:bold;'>This note is private.</span><br>Please login to view it.",
                 session_expired_msg: "Your session has expired. Please login again.",
+                update_available_msg: "New content is available.",
+                update_refresh_btn: "Refresh",
                 cancel_btn: "Cancel",
                 groups_title: "⚙️ Group Management",
                 create_group_title: "Create New Group",
@@ -402,6 +440,8 @@
                 login_desc: "La sessione scadrà alla chiusura del browser.",
                 login_private_msg: "<span style='color:#ff6b6b; font-weight:bold;'>Questa nota è privata.</span><br>Effettua l'accesso per visualizzarla.",
                 session_expired_msg: "La tua sessione è scaduta. Effettua di nuovo l'accesso.",
+                update_available_msg: "Sono disponibili nuovi contenuti.",
+                update_refresh_btn: "Aggiorna",
                 cancel_btn: "Annulla",
                 groups_title: "⚙️ Gestione Gruppi",
                 create_group_title: "Crea Nuovo Gruppo",
@@ -506,6 +546,7 @@
                 document.getElementById('context-menu').style.display = 'none'; 
             });
             fetchDataFromServer();
+            startUpdatePolling();
         };
 
         function toggleTheme() {
@@ -705,6 +746,64 @@
             }
         }
 
+        // ==========================================
+        // CONTROLLO AGGIORNAMENTI IN BACKGROUND
+        // ==========================================
+        // La webapp è un visualizzatore: le note si modificano solo da Joplin, mai da qui, quindi
+        // un poll periodico non rischia di sovrascrivere modifiche in corso. Non applichiamo però
+        // mai l'aggiornamento in automatico: se l'utente sta leggendo proprio la nota che nel
+        // frattempo è cambiata (o è stata cancellata), sparirebbe da sotto i suoi occhi senza
+        // preavviso. Ci si limita a un poll leggero (conteggio + timestamp più recente, non un
+        // confronto campo per campo) che mostra un banner discreto; l'aggiornamento vero e proprio
+        // parte solo quando l'utente stesso clicca "Aggiorna".
+        let lastDataSignature = null;
+        let updatePollTimer = null;
+
+        function computeDataSignature(data) {
+            const folders = data.folders || [];
+            const notes = data.notes || [];
+            const maxUpdated = notes.reduce((max, n) => Math.max(max, Number(n.updated_time || 0)), 0);
+            return folders.length + ':' + notes.length + ':' + maxUpdated;
+        }
+
+        function showUpdateBanner() {
+            document.getElementById('update-banner').classList.add('visible');
+        }
+
+        function hideUpdateBanner() {
+            document.getElementById('update-banner').classList.remove('visible');
+        }
+
+        function applyPendingUpdate() {
+            fetchDataFromServer(); // hideUpdateBanner() viene già richiamato dentro, a fetch completato
+        }
+
+        async function checkForUpdates() {
+            // Poll solo a scheda visibile: niente richieste inutili con la webapp in background.
+            if (document.visibilityState !== 'visible') return;
+            if (lastDataSignature === null) return; // primo caricamento non ancora completato
+
+            try {
+                const res = await fetch('/api/data' + `?_t=${Date.now()}`, { headers: authHeaders() });
+                if (!res.ok) return;
+                const data = await res.json();
+                const newSignature = computeDataSignature(data);
+                if (newSignature !== lastDataSignature) {
+                    showUpdateBanner();
+                }
+            } catch (e) { /* poll silenzioso: un errore di rete qui non deve disturbare l'utente */ }
+        }
+
+        function startUpdatePolling() {
+            if (updatePollTimer) return;
+            updatePollTimer = setInterval(checkForUpdates, 45000);
+            // Al ritorno sulla scheda dopo un po' di tempo in background, controlla subito invece
+            // di aspettare fino a 45s: è il momento in cui è più probabile che qualcosa sia cambiato.
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') checkForUpdates();
+            });
+        }
+
         async function fetchDataFromServer() {
             const refreshBtn = document.querySelector('.sidebar-actions .action-btn');
             const originalText = refreshBtn ? refreshBtn.innerText : '';
@@ -737,6 +836,8 @@
 
                 allFolders = data.folders || [];
                 allNotes = data.notes || [];
+                lastDataSignature = computeDataSignature(data);
+                hideUpdateBanner();
 
                 if (noteToRestore) {
                     const targetNote = allNotes.find(n => n.id === noteToRestore);
