@@ -122,6 +122,7 @@
         input.login-input { padding: 10px; margin: 8px 0; font-size: 14px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-notelist); color: var(--text-main); width: 100%; box-sizing: border-box; }
 
         #editor-content { padding: 40px; max-width: 900px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+        body.full-width-reading #editor-content { max-width: 100% !important; }
         #editor h1 { font-size: 1.8em; margin-bottom: 0.5em; color: var(--text-main); }
         #note-breadcrumb { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
         .breadcrumb-segment { cursor: pointer; }
@@ -196,9 +197,12 @@
             #editor img, #editor table, #editor pre, #editor blockquote { page-break-inside: avoid; break-inside: avoid; }
             #editor img { max-width: 100% !important; border: none !important; }
             #editor pre { white-space: pre-wrap; word-wrap: break-word; border: 1px solid #ccc; padding: 10px; }
-            body.pdf-export-mode .pdf-notebook-title { margin-bottom: 24px; }
+            body.pdf-export-mode .pdf-notebook-title { margin-bottom: 12px; }
+            body.pdf-export-mode .pdf-index { page-break-after: always; break-after: page; }
+            body.pdf-export-mode .pdf-index ul { list-style: decimal; padding-left: 22px; }
+            body.pdf-export-mode .pdf-index li { margin-bottom: 6px; }
+            body.pdf-export-mode .pdf-index a { color: black !important; text-decoration: underline; }
             body.pdf-export-mode .pdf-export-note { page-break-before: always; break-before: page; }
-            body.pdf-export-mode .pdf-export-note:first-of-type { page-break-before: avoid; break-before: avoid; }
         }
 
         .mobile-back-btn { display: none; background: var(--bg-sidebar); color: var(--accent-blue); border: none; border-bottom: 1px solid var(--border-color); padding: 15px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: left; width: 100%; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
@@ -335,6 +339,7 @@
             <div style="display:flex; gap:8px;">
                 <button class="tb-btn" onclick="toggleZenMode()" title="Zen Reading Mode" data-i18n="zen_btn">📖 Zen Mode</button>
                 <button id="toc-btn" class="tb-btn" style="display:none;" onclick="toggleTOC()" title="Table of Contents" data-i18n="toc_btn">📜 TOC</button>
+                <button id="width-toggle-btn" class="tb-btn" onclick="toggleReadingWidth()"></button>
             </div>
             <div style="display:flex; gap:8px;">
                 <select id="langSelect" class="tb-btn" style="outline:none;" onchange="changeLanguage(this.value)">
@@ -398,6 +403,8 @@
                 exit_zen_title: "Exit Zen Mode",
                 move_up_title: "Move up",
                 move_down_title: "Move down",
+                width_full_btn: "↔️ Full Width",
+                width_comfortable_btn: "↔️ Comfortable",
                 scope_all: "🌍 Everywhere",
                 scope_current: "📁 Current notebook",
                 sort_recent: "🕒 Most recent",
@@ -479,6 +486,8 @@
                 exit_zen_title: "Esci da Zen Mode",
                 move_up_title: "Sposta su",
                 move_down_title: "Sposta giù",
+                width_full_btn: "↔️ Larghezza piena",
+                width_comfortable_btn: "↔️ Comoda",
                 scope_all: "🌍 Ovunque",
                 scope_current: "📁 Taccuino attuale",
                 sort_recent: "🕒 Più recenti",
@@ -621,6 +630,7 @@
             updateTagDropdown();
             updateNoteList();
             updateGroupModalButton();
+            updateReadingWidthBtnLabel();
         }
 
         let allFolders = [];
@@ -651,6 +661,7 @@
 
         window.onload = function() {
             applyInitialTheme();
+            applyInitialReadingWidth();
             if (window.innerWidth <= 768) history.replaceState({ panel: 'sidebar' }, '', window.location.search || '#sidebar');
             
             initResizers();
@@ -726,6 +737,29 @@
             document.body.classList.toggle('light-theme');
             localStorage.setItem('theme', document.body.classList.contains('light-theme') ? 'light' : 'dark');
             updateNoteList();
+        }
+
+        // Larghezza di lettura: 'comfortable' (default, testo capato per leggibilità) o 'full'
+        // (usa tutta la larghezza disponibile, utile per tabelle o blocchi di codice larghi).
+        // Persistita come preferenza dell'interfaccia, non legata all'account.
+        function applyInitialReadingWidth() {
+            const isFull = localStorage.getItem('readingWidth') === 'full';
+            document.body.classList.toggle('full-width-reading', isFull);
+            updateReadingWidthBtnLabel();
+        }
+
+        function toggleReadingWidth() {
+            document.body.classList.toggle('full-width-reading');
+            localStorage.setItem('readingWidth', document.body.classList.contains('full-width-reading') ? 'full' : 'comfortable');
+            updateReadingWidthBtnLabel();
+        }
+
+        function updateReadingWidthBtnLabel() {
+            const btn = document.getElementById('width-toggle-btn');
+            if (!btn) return;
+            const isFull = document.body.classList.contains('full-width-reading');
+            btn.innerText = isFull ? t('width_comfortable_btn') : t('width_full_btn');
+            btn.title = isFull ? t('width_comfortable_btn') : t('width_full_btn');
         }
 
         function toggleZenMode() {
@@ -1556,13 +1590,25 @@
 
             // Stessa pipeline di rendering di renderContent (resource url, marked.parse, DOMPurify):
             // un notebook esportato deve avere le stesse garanzie di sanitizzazione di una nota singola.
-            let combinedHtml = `<h1 class="pdf-notebook-title">${escapeHtml(resolveDisplayTitle(folder ? folder.title : ''))}</h1>`;
-            sorted.forEach(note => {
+            const notebookTitle = escapeHtml(resolveDisplayTitle(folder ? folder.title : ''));
+
+            // Indice cliccabile come prima pagina: ogni voce punta a un ancoraggio interno del
+            // documento. I browser preservano questi link come navigazione cliccabile anche nel
+            // PDF generato dalla stampa, non solo nell'anteprima a schermo.
+            let indexHtml = '<div class="pdf-index"><ul>';
+            sorted.forEach((note, idx) => {
+                const title = escapeHtml(getNoteDisplayTitle(note)) || escapeHtml(t('untitled_note'));
+                indexHtml += `<li><a href="#pdf-note-${idx}">${title}</a></li>`;
+            });
+            indexHtml += '</ul></div>';
+
+            let combinedHtml = `<h1 class="pdf-notebook-title">${notebookTitle}</h1>${indexHtml}`;
+            sorted.forEach((note, idx) => {
                 let cleanBody = (note.body || '').replace(/:\/([a-zA-Z0-9]{32})(?:\.([a-zA-Z0-9]+))?/g, '/api/resource/$1');
                 let rawHtml = marked.parse(cleanBody);
                 let htmlContent = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target'] });
                 const displayTitle = escapeHtml(getNoteDisplayTitle(note));
-                combinedHtml += `<div class="pdf-export-note"><h2>${displayTitle}</h2>${htmlContent}</div>`;
+                combinedHtml += `<div class="pdf-export-note" id="pdf-note-${idx}"><h2>${displayTitle}</h2>${htmlContent}</div>`;
             });
 
             const editorContent = document.getElementById('editor-content');
