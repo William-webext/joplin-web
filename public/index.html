@@ -406,7 +406,8 @@
                 logging_in_msg: "⏳ Logging in...",
                 export_pdf_btn: "📄 Export Notebook to PDF",
                 export_empty_msg: "This notebook has no notes to export.",
-                export_no_folder_msg: "Select a notebook first."
+                export_no_folder_msg: "Select a notebook first.",
+                save_groups_error: "Failed to save groups. Please try again."
             },
             it: {
                 notebooks_title: "📓 Taccuini",
@@ -473,7 +474,8 @@
                 logging_in_msg: "⏳ Accesso in corso...",
                 export_pdf_btn: "📄 Esporta Notebook in PDF",
                 export_empty_msg: "Questo notebook non ha note da esportare.",
-                export_no_folder_msg: "Seleziona prima un notebook."
+                export_no_folder_msg: "Seleziona prima un notebook.",
+                save_groups_error: "Salvataggio gruppi non riuscito. Riprova."
             }
         };
 
@@ -565,6 +567,12 @@
             });
             fetchDataFromServer();
             startUpdatePolling();
+
+            // sw.js esiste sul server da prima ma non veniva mai registrato: senza questa chiamata
+            // il browser non considera l'app installabile come PWA (manifest da solo non basta).
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js').catch(() => {});
+            }
         };
 
         function toggleTheme() {
@@ -580,7 +588,7 @@
         function showToast(message, isError = false) {
             const toast = document.getElementById('toast');
             const icon = isError ? '⚠️' : '✅';
-            toast.innerHTML = '<span>' + icon + '</span> ' + message;
+            toast.innerHTML = '<span>' + icon + '</span> ' + escapeHtml(message);
             toast.classList.add('show');
             setTimeout(() => { toast.classList.remove('show'); }, 3000);
         }
@@ -953,8 +961,15 @@
                 renderGroupsList();
                 updateGroupModalButton();
             } else {
-                await saveGroupsToServer();
-                document.getElementById('groups-modal').style.display = 'none';
+                // Prima si chiudeva il modale a prescindere dall'esito: se /api/admin/groups falliva
+                // (sessione scaduta, permessi, rete), l'utente credeva che le modifiche fossero salvate
+                // mentre in realtà erano andate perse in silenzio.
+                const saved = await saveGroupsToServer();
+                if (saved) {
+                    document.getElementById('groups-modal').style.display = 'none';
+                } else {
+                    showToast(t('save_groups_error'), true);
+                }
             }
         }
 
@@ -963,17 +978,22 @@
             document.getElementById('groups-modal').style.display = 'none'; 
         }
 
-        async function saveGroupsToServer() { 
-            await fetch('/api/admin/groups', { 
-                method: 'POST', 
-                headers: authHeaders({ 'Content-Type': 'application/json' }), 
-                body: JSON.stringify({ groups: systemGroups }) 
-            }); 
+        async function saveGroupsToServer() {
+            try {
+                const res = await fetch('/api/admin/groups', {
+                    method: 'POST',
+                    headers: authHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ groups: systemGroups })
+                });
+                return res.ok;
+            } catch (e) {
+                return false;
+            }
         }
 
         function deleteGroup(groupId) { systemGroups = systemGroups.filter(g => g.id !== groupId); renderGroupsList(); }
         function toggleMember(groupId, email) { const group = systemGroups.find(g => g.id === groupId); if (!group) return; if (!group.members) group.members = []; if (group.members.includes(email)) group.members = group.members.filter(m => m !== email); else group.members.push(email); }
-        function renderGroupsList() { const container = document.getElementById('groups-container-list'); container.innerHTML = ''; if (systemGroups.length === 0) { container.innerHTML = `<div style="color:var(--text-muted); font-size:13px;">${t('no_groups')}</div>`; return; } systemGroups.forEach(g => { const card = document.createElement('div'); card.style.cssText = 'background: var(--bg-editor); padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border-color);'; let usersHtml = ''; systemUsers.forEach(u => { const isChecked = g.members && g.members.includes(u.email) ? 'checked' : ''; const safeEmail = escapeHtml(u.email); usersHtml += `<label style="display:block; font-size:12px; margin:3px 0; color:var(--text-main);"><input type="checkbox" ${isChecked} onchange="toggleMember('${g.id}', '${safeEmail}')"> ${safeEmail}</label>`; }); card.innerHTML = ` <div style="display:flex; justify-between; align-items:center; margin-bottom: 8px;"> <strong style="color:var(--text-main); font-size: 14px;">👥 ${escapeHtml(g.name)}</strong> <button style="background:#a93226; color:white; border:none; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" onclick="deleteGroup('${g.id}')">${t('delete_btn')}</button> </div> <div style="max-height: 100px; overflow-y:auto; border-top:1px solid var(--border-color); padding-top:5px;"> ${usersHtml} </div>`; container.appendChild(card); }); }
+        function renderGroupsList() { const container = document.getElementById('groups-container-list'); container.innerHTML = ''; if (systemGroups.length === 0) { container.innerHTML = `<div style="color:var(--text-muted); font-size:13px;">${t('no_groups')}</div>`; return; } systemGroups.forEach(g => { const card = document.createElement('div'); card.style.cssText = 'background: var(--bg-editor); padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border-color);'; const safeGroupId = escapeHtml(g.id); let usersHtml = ''; systemUsers.forEach(u => { const isChecked = g.members && g.members.includes(u.email) ? 'checked' : ''; const safeEmail = escapeHtml(u.email); usersHtml += `<label style="display:block; font-size:12px; margin:3px 0; color:var(--text-main);"><input type="checkbox" data-group-id="${safeGroupId}" data-email="${safeEmail}" ${isChecked} onchange="toggleMember(this.dataset.groupId, this.dataset.email)"> ${safeEmail}</label>`; }); card.innerHTML = ` <div style="display:flex; justify-between; align-items:center; margin-bottom: 8px;"> <strong style="color:var(--text-main); font-size: 14px;">👥 ${escapeHtml(g.name)}</strong> <button data-group-id="${safeGroupId}" style="background:#a93226; color:white; border:none; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" onclick="deleteGroup(this.dataset.groupId)">${t('delete_btn')}</button> </div> <div style="max-height: 100px; overflow-y:auto; border-top:1px solid var(--border-color); padding-top:5px;"> ${usersHtml} </div>`; container.appendChild(card); }); }
 
         function getRecursiveNoteCount(folderId) {
             let count = allNotes.filter(n => n.parent_id === folderId).length;
