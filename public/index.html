@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Joplin Web Portal</title>
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -68,7 +68,7 @@
         .folder-title:hover .pin-btn, .pin-btn.pinned { opacity: 1; filter: grayscale(0%); }
         .pin-btn:not(.pinned) { filter: grayscale(100%) opacity(0.5); }
 
-        .sidebar-actions { padding: 10px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 5px; background-color: var(--bg-sidebar); }
+        .sidebar-actions { padding: 10px; padding-bottom: max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 5px; background-color: var(--bg-sidebar); }
         .action-btn { width: 100%; padding: 8px; background: var(--bg-notelist); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; cursor: pointer; font-size: 12px; text-align: center; }
         .action-btn:hover { background: var(--hover-bg); }
 
@@ -181,7 +181,7 @@
 
         @media (max-width: 768px) {
             .resizer { display: none !important; }
-            #sidebar, #notes-list, #editor { width: 100% !important; min-width: 100% !important; height: 100vh !important; display: none !important; }
+            #sidebar, #notes-list, #editor { width: 100% !important; min-width: 100% !important; height: 100vh !important; height: 100dvh !important; display: none !important; }
             body.view-sidebar #sidebar { display: flex !important; }
             body.view-notes #notes-list { display: flex !important; }
             body.view-editor #editor { display: flex !important; }
