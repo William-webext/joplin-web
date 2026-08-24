@@ -320,39 +320,43 @@ app.use((req, res, next) => {
   next();
 });
 
-// Limita i tentativi di login per IP: max 10 tentativi ogni 15 minuti.
-// In-memory, va bene per un'app self-hosted a singolo processo (non serve Redis per questo volume).
-const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const LOGIN_MAX_ATTEMPTS = 10;
-const loginAttempts = new Map(); // ip -> { count, resetAt }
+// Fabbrica di rate limiter in-memory per IP, riusata sia per il login sia per il form di supporto.
+// Va bene in-memory (niente Redis) per un'app self-hosted a singolo processo con questo volume.
+function createRateLimiter(windowMs, maxAttempts, errorMessage) {
+  const attempts = new Map(); // ip -> { count, resetAt }
 
-function loginRateLimit(req, res, next) {
-  const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const now = Date.now();
-  const entry = loginAttempts.get(ip);
+  const middleware = (req, res, next) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const entry = attempts.get(ip);
 
-  if (!entry || entry.resetAt < now) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
-    return next();
-  }
+    if (!entry || entry.resetAt < now) {
+      attempts.set(ip, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
 
-  if (entry.count >= LOGIN_MAX_ATTEMPTS) {
-    const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
-    res.setHeader('Retry-After', String(retryAfterSec));
-    return res.status(429).json({ error: 'Troppi tentativi di login. Riprova più tardi.' });
-  }
+    if (entry.count >= maxAttempts) {
+      const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
+      res.setHeader('Retry-After', String(retryAfterSec));
+      return res.status(429).json({ error: errorMessage });
+    }
 
-  entry.count += 1;
-  next();
+    entry.count += 1;
+    next();
+  };
+
+  // Pulizia periodica delle voci scadute, per non far crescere la Map all'infinito su un processo long-running
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of attempts) {
+      if (entry.resetAt < now) attempts.delete(ip);
+    }
+  }, windowMs).unref();
+
+  return middleware;
 }
 
-// Pulizia periodica delle voci scadute, per non far crescere la Map all'infinito su un processo long-running
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of loginAttempts) {
-    if (entry.resetAt < now) loginAttempts.delete(ip);
-  }
-}, LOGIN_WINDOW_MS).unref();
+const loginRateLimit = createRateLimiter(15 * 60 * 1000, 10, 'Troppi tentativi di login. Riprova più tardi.');
 
 // Unica fonte di verità per "email+password sono validi": prima questa stessa query e lo stesso
 // bcrypt.compare erano scritti separatamente sia qui sia dentro /api/login — due copie della
