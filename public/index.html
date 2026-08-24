@@ -145,36 +145,6 @@
 
         .mobile-back-btn { display: none; background: var(--bg-sidebar); color: var(--accent-blue); border: none; border-bottom: 1px solid var(--border-color); padding: 15px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: left; width: 100%; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
 
-        #update-banner {
-            display: none;
-            position: fixed;
-            bottom: 16px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 200;
-            background: var(--accent-blue, #0e639c);
-            color: white;
-            padding: 10px 16px;
-            border-radius: 8px;
-            font-size: 13px;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.35);
-            display: none;
-            align-items: center;
-            gap: 12px;
-        }
-        #update-banner.visible { display: flex; }
-        #update-banner button {
-            background: rgba(255,255,255,0.2);
-            border: none;
-            color: white;
-            padding: 5px 10px;
-            border-radius: 5px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        #update-banner button:hover { background: rgba(255,255,255,0.32); }
-
         @media (max-width: 768px) {
             .resizer { display: none !important; }
             #sidebar, #notes-list, #editor { width: 100% !important; min-width: 100% !important; height: 100vh !important; display: none !important; }
@@ -185,7 +155,6 @@
             .modal-card { width: 90% !important; padding: 15px !important; }
             #editor-content { padding: 20px !important; }
             #editor h1 { font-size: 1.5em !important; }
-            #update-banner { bottom: 10px; width: 90%; justify-content: space-between; }
         }
     </style>
 </head>
@@ -238,11 +207,6 @@
             <button id="group-action-btn" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="handleGroupAction()">OK</button>
             <button class="action-btn" style="margin-top: 10px;" onclick="cancelGroupsModal()" data-i18n="cancel_btn">Annulla</button>
         </div>
-    </div>
-
-    <div id="update-banner">
-        <span data-i18n="update_available_msg">New content is available.</span>
-        <button onclick="applyPendingUpdate()" data-i18n="update_refresh_btn">Refresh</button>
     </div>
 
     <div id="sidebar">
@@ -329,7 +293,7 @@
 
         // Ripulisce il titolo da qualsiasi emoji Unicode (pallini o icone generiche) all'inizio e alla fine
         function getCleanTitle(title) {
-            let clean = title || '';
+            let clean = resolveDisplayTitle(title);
             ALL_EMOJIS.forEach(e => {
                 if (clean.startsWith(e)) clean = clean.substring(e.length);
                 if (clean.endsWith(e)) clean = clean.substring(0, clean.length - e.length);
@@ -339,11 +303,12 @@
             return clean.trim();
         }
 
-        // Titolo mostrato all'utente: nessuna pulizia, le emoji eventuali restano visibili.
+        // Titolo mostrato all'utente: nessuna pulizia emoji, restano visibili — solo il marcatore
+        // neutro di titolo mancante viene tradotto secondo la lingua scelta in UI.
         // getCleanTitle (sopra) resta usata a parte solo per il confronto nell'ordinamento alfabetico,
         // così un titolo che inizia con un'emoji non finisce fuori posto nell'ordine A-Z.
         function getNoteDisplayTitle(note) {
-            return (note.title || '').trim();
+            return resolveDisplayTitle(note.title).trim();
         }
 
         const i18nDict = {
@@ -391,8 +356,6 @@
                 login_desc: "Session will expire when browser is closed.",
                 login_private_msg: "<span style='color:#ff6b6b; font-weight:bold;'>This note is private.</span><br>Please login to view it.",
                 session_expired_msg: "Your session has expired. Please login again.",
-                update_available_msg: "New content is available.",
-                update_refresh_btn: "Refresh",
                 cancel_btn: "Cancel",
                 groups_title: "⚙️ Group Management",
                 create_group_title: "Create New Group",
@@ -413,7 +376,11 @@
                 export_pdf_btn: "📄 Export Notebook to PDF",
                 export_empty_msg: "This notebook has no notes to export.",
                 export_no_folder_msg: "Select a notebook first.",
-                save_groups_error: "Failed to save groups. Please try again."
+                save_groups_error: "Failed to save groups. Please try again.",
+                untitled_folder: "Untitled",
+                untitled_note: "New Note",
+                untitled_tag: "Tag",
+                published_tag_label: "Published"
             },
             it: {
                 notebooks_title: "📓 Taccuini",
@@ -459,8 +426,6 @@
                 login_desc: "La sessione scadrà alla chiusura del browser.",
                 login_private_msg: "<span style='color:#ff6b6b; font-weight:bold;'>Questa nota è privata.</span><br>Effettua l'accesso per visualizzarla.",
                 session_expired_msg: "La tua sessione è scaduta. Effettua di nuovo l'accesso.",
-                update_available_msg: "Sono disponibili nuovi contenuti.",
-                update_refresh_btn: "Aggiorna",
                 cancel_btn: "Annulla",
                 groups_title: "⚙️ Gestione Gruppi",
                 create_group_title: "Crea Nuovo Gruppo",
@@ -481,7 +446,11 @@
                 export_pdf_btn: "📄 Esporta Notebook in PDF",
                 export_empty_msg: "Questo notebook non ha note da esportare.",
                 export_no_folder_msg: "Seleziona prima un notebook.",
-                save_groups_error: "Salvataggio gruppi non riuscito. Riprova."
+                save_groups_error: "Salvataggio gruppi non riuscito. Riprova.",
+                untitled_folder: "Senza Titolo",
+                untitled_note: "Nuova Nota",
+                untitled_tag: "Tag",
+                published_tag_label: "Pubblicato"
             }
         };
 
@@ -496,6 +465,28 @@
 
         function t(key) {
             return (i18nDict[currentLang] && i18nDict[currentLang][key]) || (i18nDict['en'][key]) || key;
+        }
+
+        // Il server manda marcatori neutri (es. '__untitled_note__') per titoli mancanti e per il
+        // tag sintetico 'pubblicato', invece di testo in una lingua fissa — così seguono la lingua
+        // scelta in UI invece di essere sempre in italiano indipendentemente dal resto dell'interfaccia.
+        const TITLE_MARKER_KEYS = {
+            '__untitled_folder__': 'untitled_folder',
+            '__untitled_note__': 'untitled_note'
+        };
+        const TAG_MARKER_KEYS = {
+            '__untitled_tag__': 'untitled_tag',
+            '__published_tag__': 'published_tag_label'
+        };
+
+        function resolveDisplayTitle(rawTitle) {
+            const key = TITLE_MARKER_KEYS[rawTitle];
+            return key ? t(key) : (rawTitle || '');
+        }
+
+        function resolveTagLabel(rawTag) {
+            const key = TAG_MARKER_KEYS[rawTag];
+            return key ? t(key) : rawTag;
         }
 
         function escapeHtml(str) {
@@ -573,7 +564,6 @@
                 document.getElementById('context-menu').style.display = 'none'; 
             });
             fetchDataFromServer();
-            startUpdatePolling();
 
             // sw.js esiste sul server da prima ma non veniva mai registrato: senza questa chiamata
             // il browser non considera l'app installabile come PWA (manifest da solo non basta).
@@ -810,64 +800,6 @@
             }
         }
 
-        // ==========================================
-        // CONTROLLO AGGIORNAMENTI IN BACKGROUND
-        // ==========================================
-        // La webapp è un visualizzatore: le note si modificano solo da Joplin, mai da qui, quindi
-        // un poll periodico non rischia di sovrascrivere modifiche in corso. Non applichiamo però
-        // mai l'aggiornamento in automatico: se l'utente sta leggendo proprio la nota che nel
-        // frattempo è cambiata (o è stata cancellata), sparirebbe da sotto i suoi occhi senza
-        // preavviso. Ci si limita a un poll leggero (conteggio + timestamp più recente, non un
-        // confronto campo per campo) che mostra un banner discreto; l'aggiornamento vero e proprio
-        // parte solo quando l'utente stesso clicca "Aggiorna".
-        let lastDataSignature = null;
-        let updatePollTimer = null;
-
-        function computeDataSignature(data) {
-            const folders = data.folders || [];
-            const notes = data.notes || [];
-            const maxUpdated = notes.reduce((max, n) => Math.max(max, Number(n.updated_time || 0)), 0);
-            return folders.length + ':' + notes.length + ':' + maxUpdated;
-        }
-
-        function showUpdateBanner() {
-            document.getElementById('update-banner').classList.add('visible');
-        }
-
-        function hideUpdateBanner() {
-            document.getElementById('update-banner').classList.remove('visible');
-        }
-
-        function applyPendingUpdate() {
-            fetchDataFromServer(); // hideUpdateBanner() viene già richiamato dentro, a fetch completato
-        }
-
-        async function checkForUpdates() {
-            // Poll solo a scheda visibile: niente richieste inutili con la webapp in background.
-            if (document.visibilityState !== 'visible') return;
-            if (lastDataSignature === null) return; // primo caricamento non ancora completato
-
-            try {
-                const res = await fetch('/api/data' + `?_t=${Date.now()}`, { headers: authHeaders() });
-                if (!res.ok) return;
-                const data = await res.json();
-                const newSignature = computeDataSignature(data);
-                if (newSignature !== lastDataSignature) {
-                    showUpdateBanner();
-                }
-            } catch (e) { /* poll silenzioso: un errore di rete qui non deve disturbare l'utente */ }
-        }
-
-        function startUpdatePolling() {
-            if (updatePollTimer) return;
-            updatePollTimer = setInterval(checkForUpdates, 45000);
-            // Al ritorno sulla scheda dopo un po' di tempo in background, controlla subito invece
-            // di aspettare fino a 45s: è il momento in cui è più probabile che qualcosa sia cambiato.
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible') checkForUpdates();
-            });
-        }
-
         async function fetchDataFromServer() {
             const refreshBtn = document.querySelector('.sidebar-actions .action-btn');
             const originalText = refreshBtn ? refreshBtn.innerText : '';
@@ -900,8 +832,6 @@
 
                 allFolders = data.folders || [];
                 allNotes = data.notes || [];
-                lastDataSignature = computeDataSignature(data);
-                hideUpdateBanner();
 
                 if (noteToRestore) {
                     const targetNote = allNotes.find(n => n.id === noteToRestore);
@@ -1047,10 +977,10 @@
                         const ia = indexMap.has(a.id) ? indexMap.get(a.id) : Infinity;
                         const ib = indexMap.has(b.id) ? indexMap.get(b.id) : Infinity;
                         if (ia !== ib) return ia - ib;
-                        return a.title.localeCompare(b.title);
+                        return resolveDisplayTitle(a.title).localeCompare(resolveDisplayTitle(b.title));
                     });
                 }
-                return [...list].sort((a, b) => a.title.localeCompare(b.title));
+                return [...list].sort((a, b) => resolveDisplayTitle(a.title).localeCompare(resolveDisplayTitle(b.title)));
             }
 
             function persistFolderOrder(parentKey, orderedIds) {
@@ -1112,7 +1042,7 @@
                 const arrow = hasChildren ? `<span class="toggle-arrow ${isExpanded ? 'open' : ''}">▶</span>` : `<span class="toggle-arrow" style="visibility:hidden;">▶</span>`;
                 const icon = folder.icon ? `<span style="margin-right: 8px;">${folder.icon}</span>` : `<span style="margin-right: 8px;">📁</span>`;
                 
-                const safeFolderTitle = escapeHtml(folder.title);
+                const safeFolderTitle = escapeHtml(resolveDisplayTitle(folder.title));
                 if(forceOpen) {
                     titleDiv.innerHTML = `${pinHtml}<span style="visibility:hidden; width:20px; display:inline-block;"></span>${icon}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeFolderTitle}</span>${countBadge}`;
                 } else {
@@ -1192,11 +1122,15 @@
             const scopeVal = document.getElementById('scopeSelect') ? document.getElementById('scopeSelect').value : 'current';
             const folderNotes = (scopeVal === 'all') ? allNotes : allNotes.filter(n => n.parent_id === currentFolderId);
             const uniqueTags = new Set();
-            folderNotes.forEach(n => { if (n.tags && Array.isArray(n.tags)) n.tags.forEach(t => uniqueTags.add(t)); });
-            Array.from(uniqueTags).sort().forEach(tag => {
-                const opt = document.createElement('option'); opt.value = tag; opt.textContent = '🏷️ ' + tag;
-                if (tag === currentVal) opt.selected = true; tagSelect.appendChild(opt);
-            });
+            folderNotes.forEach(n => { if (n.tags && Array.isArray(n.tags)) n.tags.forEach(tg => uniqueTags.add(tg)); });
+            // Il value dell'opzione resta il tag grezzo (serve al filtro per matchare note.tags),
+            // solo il testo mostrato viene tradotto se è uno dei tag sintetici del server.
+            Array.from(uniqueTags)
+                .sort((a, b) => resolveTagLabel(a).localeCompare(resolveTagLabel(b)))
+                .forEach(tag => {
+                    const opt = document.createElement('option'); opt.value = tag; opt.textContent = '🏷️ ' + resolveTagLabel(tag);
+                    if (tag === currentVal) opt.selected = true; tagSelect.appendChild(opt);
+                });
         }
 
         function showContextMenu(x, y, note) {
@@ -1291,7 +1225,7 @@
                 filtered = filtered.filter(n => {
                     const cleanTitle = getCleanTitle(n.title).toLowerCase();
                     const bodyText = (n.body || '').toLowerCase();
-                    const tagsText = (n.tags || []).join(' ').toLowerCase();
+                    const tagsText = (n.tags || []).map(resolveTagLabel).join(' ').toLowerCase();
                     const haystack = cleanTitle + ' ' + bodyText + ' ' + tagsText;
                     return queryWords.every(w => haystack.includes(w));
                 });
@@ -1328,7 +1262,7 @@
 
                 let tagsBadge = '';
                 if (note.tags && note.tags.length > 0) {
-                    tagsBadge = note.tags.map(tg => `<span class="tag-badge" style="font-size:10px; background:var(--badge-bg); color:inherit; padding:1px 5px; border-radius:3px;">${escapeHtml(tg)}</span>`).join('');
+                    tagsBadge = note.tags.map(tg => `<span class="tag-badge" style="font-size:10px; background:var(--badge-bg); color:inherit; padding:1px 5px; border-radius:3px;">${escapeHtml(resolveTagLabel(tg))}</span>`).join('');
                 }
 
                 const displayTitle = escapeHtml(getNoteDisplayTitle(note));
@@ -1388,7 +1322,7 @@
 
             // Stessa pipeline di rendering di renderContent (resource url, marked.parse, DOMPurify):
             // un notebook esportato deve avere le stesse garanzie di sanitizzazione di una nota singola.
-            let combinedHtml = `<h1 class="pdf-notebook-title">${escapeHtml(folder ? folder.title : '')}</h1>`;
+            let combinedHtml = `<h1 class="pdf-notebook-title">${escapeHtml(resolveDisplayTitle(folder ? folder.title : ''))}</h1>`;
             sorted.forEach(note => {
                 let cleanBody = (note.body || '').replace(/:\/([a-zA-Z0-9]{32})(?:\.([a-zA-Z0-9]+))?/g, '/api/resource/$1');
                 let rawHtml = marked.parse(cleanBody);
