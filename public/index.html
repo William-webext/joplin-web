@@ -132,6 +132,9 @@
             #editor img, #editor table, #editor pre, #editor blockquote { page-break-inside: avoid; break-inside: avoid; }
             #editor img { max-width: 100% !important; border: none !important; }
             #editor pre { white-space: pre-wrap; word-wrap: break-word; border: 1px solid #ccc; padding: 10px; }
+            body.pdf-export-mode .pdf-notebook-title { margin-bottom: 24px; }
+            body.pdf-export-mode .pdf-export-note { page-break-before: always; break-before: page; }
+            body.pdf-export-mode .pdf-export-note:first-of-type { page-break-before: avoid; break-before: avoid; }
         }
 
         .mobile-back-btn { display: none; background: var(--bg-sidebar); color: var(--accent-blue); border: none; border-bottom: 1px solid var(--border-color); padding: 15px; font-size: 14px; font-weight: bold; cursor: pointer; text-align: left; width: 100%; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
@@ -281,6 +284,9 @@
                     <option value="orange" data-i18n="color_orange">🟠 Orange</option>
                 </select>
             </div>
+            <div class="search-row">
+                <button class="search-select-field" onclick="exportNotebookToPdf()" data-i18n="export_pdf_btn">📄 Export Notebook to PDF</button>
+            </div>
         </div>
         <div id="notes-container" class="list-container">
             <div style="padding:15px; color:var(--text-muted); font-size: 13px;" data-i18n="select_notebook_prompt">Select a notebook...</div>
@@ -397,7 +403,10 @@
                 err_enter_group_name: "Please enter a group name",
                 conn_error: "Connection Error",
                 login_timeout_msg: "The server is taking too long to respond. Please try again.",
-                logging_in_msg: "⏳ Logging in..."
+                logging_in_msg: "⏳ Logging in...",
+                export_pdf_btn: "📄 Export Notebook to PDF",
+                export_empty_msg: "This notebook has no notes to export.",
+                export_no_folder_msg: "Select a notebook first."
             },
             it: {
                 notebooks_title: "📓 Taccuini",
@@ -461,7 +470,10 @@
                 err_enter_group_name: "Inserisci un nome per il gruppo",
                 conn_error: "Errore di connessione",
                 login_timeout_msg: "Il server sta impiegando troppo tempo a rispondere. Riprova.",
-                logging_in_msg: "⏳ Accesso in corso..."
+                logging_in_msg: "⏳ Accesso in corso...",
+                export_pdf_btn: "📄 Esporta Notebook in PDF",
+                export_empty_msg: "Questo notebook non ha note da esportare.",
+                export_no_folder_msg: "Seleziona prima un notebook."
             }
         };
 
@@ -1254,6 +1266,51 @@
         function toggleTOC() {
             const menu = document.getElementById('toc-menu');
             menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function exportNotebookToPdf() {
+            if (!currentFolderId) { showToast(t('export_no_folder_msg'), true); return; }
+
+            const folder = allFolders.find(f => f.id === currentFolderId);
+            const notesInFolder = allNotes.filter(n => n.parent_id === currentFolderId);
+            if (notesInFolder.length === 0) { showToast(t('export_empty_msg'), true); return; }
+
+            // Ordine alfabetico indipendente dall'ordinamento scelto nella lista: un documento
+            // esportato ha senso sia leggibile e prevedibile, non legato all'ultimo sort applicato in UI.
+            const sorted = [...notesInFolder].sort((a, b) =>
+                getCleanTitle(a.title).localeCompare(getCleanTitle(b.title))
+            );
+
+            // Stessa pipeline di rendering di renderContent (resource url, marked.parse, DOMPurify):
+            // un notebook esportato deve avere le stesse garanzie di sanitizzazione di una nota singola.
+            let combinedHtml = `<h1 class="pdf-notebook-title">${escapeHtml(folder ? folder.title : '')}</h1>`;
+            sorted.forEach(note => {
+                let cleanBody = (note.body || '').replace(/:\/([a-zA-Z0-9]{32})(?:\.([a-zA-Z0-9]+))?/g, '/api/resource/$1');
+                let rawHtml = marked.parse(cleanBody);
+                let htmlContent = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target'] });
+                const displayTitle = escapeHtml(getNoteDisplayTitle(note));
+                combinedHtml += `<div class="pdf-export-note"><h2>${displayTitle}</h2>${htmlContent}</div>`;
+            });
+
+            const editorContent = document.getElementById('editor-content');
+            const savedHtml = editorContent.innerHTML;
+            document.body.classList.add('pdf-export-mode');
+            editorContent.innerHTML = combinedHtml;
+
+            let restored = false;
+            const restore = () => {
+                if (restored) return; // afterprint e il fallback potrebbero scattare entrambi: idempotente
+                restored = true;
+                editorContent.innerHTML = savedHtml;
+                document.body.classList.remove('pdf-export-mode');
+                window.removeEventListener('afterprint', restore);
+            };
+            window.addEventListener('afterprint', restore);
+            // Rete di sicurezza: se per qualche motivo 'afterprint' non scattasse in un browser
+            // particolare, non si resta bloccati con il contenuto dell'export al posto della nota.
+            setTimeout(restore, 60000);
+
+            setTimeout(() => window.print(), 300);
         }
 
         function renderContent(note) {
