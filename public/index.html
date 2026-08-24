@@ -159,7 +159,23 @@
         #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--bg-sidebar); border: 1px solid var(--border-color); color: var(--text-main); padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 500; box-shadow: 0 5px 15px rgba(0,0,0,0.5); opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0.3s; z-index: 10000; display: flex; align-items: center; gap: 10px; }
         #toast.show { opacity: 1; visibility: visible; }
 
-        body.zen-mode #sidebar, body.zen-mode #notes-list, body.zen-mode .resizer { display: none !important; }
+        body.zen-mode #sidebar, body.zen-mode #notes-list, body.zen-mode .resizer, body.zen-mode .editor-toolbar { display: none !important; }
+        #zen-exit-btn {
+            display: none;
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 500;
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            border-radius: 50%;
+            width: 34px;
+            height: 34px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        body.zen-mode #zen-exit-btn { display: block; }
 
         @media print {
             @page { margin: 1.5cm; size: auto; }
@@ -305,6 +321,7 @@
     <div class="resizer" id="resizer-2"></div>
 
     <div id="editor">
+        <button id="zen-exit-btn" onclick="toggleZenMode()" data-i18n-title="exit_zen_title" data-i18n-aria="exit_zen_title" aria-label="Exit Zen Mode">✕</button>
         <button class="mobile-back-btn" onclick="history.back()" data-i18n="back_notes">🔙 Notes</button>
         <div class="editor-toolbar">
             <div style="display:flex; gap:8px;">
@@ -370,6 +387,7 @@
                 collapse_folder_title: "Collapse notebook",
                 close_lightbox_aria: "Close image",
                 read_only_notice: "👁️ Read-only viewer",
+                exit_zen_title: "Exit Zen Mode",
                 scope_all: "🌍 Everywhere",
                 scope_current: "📁 Current notebook",
                 sort_recent: "🕒 Most recent",
@@ -448,6 +466,7 @@
                 collapse_folder_title: "Comprimi notebook",
                 close_lightbox_aria: "Chiudi immagine",
                 read_only_notice: "👁️ Solo lettura",
+                exit_zen_title: "Esci da Zen Mode",
                 scope_all: "🌍 Ovunque",
                 scope_current: "📁 Taccuino attuale",
                 sort_recent: "🕒 Più recenti",
@@ -727,10 +746,15 @@
             attachResize(resizer2, notesList, 200, 600);
         }
 
-        function showPanel(panelName, pushHistory = true) {
+        function showPanel(panelName, pushHistory = true, urlOverride = null) {
             document.body.className = (document.body.classList.contains('light-theme') ? 'light-theme ' : '') + 'view-' + panelName;
             if (pushHistory && window.innerWidth <= 768) {
-                history.pushState({ panel: panelName }, '', window.location.search || '#' + panelName);
+                history.pushState({ panel: panelName }, '', urlOverride || (window.location.search || '#' + panelName));
+            } else if (urlOverride) {
+                // Desktop (o quando non si deve creare una nuova voce nella history mobile):
+                // aggiorna comunque l'URL, così un refresh (F5) o un link copiato riaprono la
+                // stessa nota — ma con replaceState, senza duplicare voci nella history.
+                history.replaceState({ panel: panelName }, '', urlOverride);
             }
         }
 
@@ -1398,7 +1422,6 @@
                 
                 div.onclick = () => {
                     currentNoteId = note.id;
-                    history.replaceState({ panel: 'editor' }, '', '?note=' + note.id);
                     
                     if (scopeSelect.value === 'all' && currentFolderId !== note.parent_id) {
                         currentFolderId = note.parent_id;
@@ -1409,7 +1432,7 @@
                     document.querySelectorAll('.note-item').forEach(el => el.classList.remove('active'));
                     div.classList.add('active');
                     renderContent(note);
-                    showPanel('editor', true);
+                    showPanel('editor', true, '?note=' + note.id);
                 };
 
                 div.ondblclick = (e) => {
