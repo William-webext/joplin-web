@@ -348,9 +348,21 @@ async function findAuthenticatedUser(email, password) {
   }
 }
 
-async function authenticateRequest(auth) {
-  if (!auth) return false;
-  return !!(await findAuthenticatedUser(auth.email, auth.password));
+// Senza questo controllo, /api/publish verificava solo che email+password fossero valide per
+// UN account qualsiasi, non che il notebook appartenesse davvero a chi lo sta pubblicando —
+// qualunque utente registrato poteva pubblicare (o derubricare) il notebook privato di un altro
+// utente semplicemente conoscendone l'id. owner_id è la stessa colonna che /api/data usa già per
+// filtrare correttamente le note private per proprietario reale.
+async function userOwnsFolder(userId, folderId) {
+  try {
+    const result = await pool.query(
+      `SELECT 1 FROM items WHERE jop_id = $1 AND jop_type = 2 AND owner_id = $2 LIMIT 1`,
+      [folderId, userId]
+    );
+    return result.rows.length > 0;
+  } catch (e) {
+    return false;
+  }
 }
 
 // 4. API PREFERENZE UI (SQLITE)
@@ -429,9 +441,18 @@ app.get('/api/published-list', requireAuth, (req, res) => {
 
 app.post('/api/publish', loginRateLimit, async (req, res) => {
   const { auth, folder, folders, notes, updateOnlyVisibility } = req.body;
-  if (!(await authenticateRequest(auth))) return res.status(401).json({ error: 'Authentication failed.' });
+  const user = await findAuthenticatedUser(auth && auth.email, auth && auth.password);
+  if (!user) return res.status(401).json({ error: 'Authentication failed.' });
   const targetFolders = folders || (folder ? [folder] : []);
   if (targetFolders.length === 0) return res.status(400).json({ error: 'Missing data' });
+
+  // Controllo di proprietà per ogni notebook coinvolto: pubblicare o derubricare il notebook di
+  // un altro utente non è permesso nemmeno con credenziali proprie valide.
+  for (const tf of targetFolders) {
+    if (!(await userOwnsFolder(user.id, tf.id))) {
+      return res.status(403).json({ error: 'Non hai i permessi per pubblicare questo notebook.' });
+    }
+  }
 
   const currentData = getPublishedData();
   const folderIds = targetFolders.map(f => f.id);
@@ -503,11 +524,11 @@ app.get('/api/data', optionalAuth, async (req, res) => {
         if (row.jop_type === 2) {
           let extractedIcon = '';
           if (parsedContent.icon) { try { extractedIcon = JSON.parse(parsedContent.icon).emoji || ''; } catch (e) { extractedIcon = parsedContent.icon; } }
-          foldersRaw.push({ id: row.jop_id, parent_id: effectiveParentId, icon: extractedIcon || '📁', title: parsedContent.title || 'Senza Titolo', isPublished: false });
+          foldersRaw.push({ id: row.jop_id, parent_id: effectiveParentId, icon: extractedIcon || '📁', title: parsedContent.title || '__untitled_folder__', isPublished: false });
         } else if (row.jop_type === 1) {
-          allNotes.push({ id: row.jop_id, parent_id: effectiveParentId, title: parsedContent.title || 'Nuova Nota', body: parsedContent.body || '', updated_time: Number(parsedContent.user_updated_time || parsedContent.updated_time || 0) });
+          allNotes.push({ id: row.jop_id, parent_id: effectiveParentId, title: parsedContent.title || '__untitled_note__', body: parsedContent.body || '', updated_time: Number(parsedContent.user_updated_time || parsedContent.updated_time || 0) });
           noteIdsSet.add(row.jop_id);
-        } else if (row.jop_type === 5) { tags.push({ id: row.jop_id, title: parsedContent.title || 'Tag' });
+        } else if (row.jop_type === 5) { tags.push({ id: row.jop_id, title: parsedContent.title || '__untitled_tag__' });
         } else if (row.jop_type === 6) { noteTags.push({ note_id: parsedContent.note_id, tag_id: parsedContent.tag_id }); }
       });
 
@@ -564,7 +585,7 @@ app.get('/api/data', optionalAuth, async (req, res) => {
   const snapshotPublishedNoteIds = new Set(); // note aggiunte SOLO perché nello snapshot: se la query live sotto non le riconferma, vanno tolte
   publishedData.notes.filter(n => visiblePublishedFolderIds.includes(n.parent_id)).forEach(n => {
     if (!noteIdsSet.has(n.id)) {
-      allNotes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.updated_time, tags: ['Pubblicato'] });
+      allNotes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.updated_time, tags: ['__published_tag__'] });
       noteIdsSet.add(n.id);
       snapshotPublishedNoteIds.add(n.id);
     }
@@ -579,7 +600,10 @@ app.get('/api/data', optionalAuth, async (req, res) => {
     const liveConfirmedNoteIds = new Set();
     let liveQuerySucceeded = false;
     try {
-      const dbLiveResult = await pool.query(`SELECT jop_id, jop_parent_id, content FROM items WHERE jop_type = 1`);
+      const dbLiveResult = await pool.query(
+        `SELECT jop_id, jop_parent_id, content FROM items WHERE jop_type = 1 AND (jop_parent_id = ANY($1) OR jop_parent_id IS NULL OR jop_parent_id = '')`,
+        [visiblePublishedFolderIds]
+      );
       dbLiveResult.rows.forEach(row => {
         let parsed = {};
         try { parsed = JSON.parse(row.content.toString('utf-8')); } catch(e) { return; }
@@ -587,7 +611,7 @@ app.get('/api/data', optionalAuth, async (req, res) => {
         const effParent = row.jop_parent_id || parsed.parent_id || '';
         if (visiblePublishedFolderIds.includes(effParent)) {
           liveConfirmedNoteIds.add(row.jop_id);
-          const freshNote = { id: row.jop_id, parent_id: effParent, title: parsed.title || 'Nuova Nota', body: parsed.body || '', updated_time: Number(parsed.user_updated_time || parsed.updated_time || 0), tags: ['Pubblicato'] };
+          const freshNote = { id: row.jop_id, parent_id: effParent, title: parsed.title || '__untitled_note__', body: parsed.body || '', updated_time: Number(parsed.user_updated_time || parsed.updated_time || 0), tags: ['__published_tag__'] };
           const existingIndex = allNotes.findIndex(n => n.id === row.jop_id);
           if (existingIndex >= 0) allNotes[existingIndex] = freshNote;
           else { allNotes.push(freshNote); noteIdsSet.add(row.jop_id); }
