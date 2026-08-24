@@ -377,6 +377,7 @@
                 export_empty_msg: "This notebook has no notes to export.",
                 export_no_folder_msg: "Select a notebook first.",
                 save_groups_error: "Failed to save groups. Please try again.",
+                groups_conflict_error: "Someone else changed the groups meanwhile. Reloaded — please redo your change.",
                 untitled_folder: "Untitled",
                 untitled_note: "New Note",
                 untitled_tag: "Tag",
@@ -447,6 +448,7 @@
                 export_empty_msg: "Questo notebook non ha note da esportare.",
                 export_no_folder_msg: "Seleziona prima un notebook.",
                 save_groups_error: "Salvataggio gruppi non riuscito. Riprova.",
+                groups_conflict_error: "Qualcun altro ha modificato i gruppi nel frattempo. Ricaricato — rifai la tua modifica.",
                 untitled_folder: "Senza Titolo",
                 untitled_note: "Nuova Nota",
                 untitled_tag: "Tag",
@@ -532,6 +534,7 @@
         let systemUsers = [];
         let systemGroups = [];
         let originalSystemGroups = [];
+        let groupsVersion = null; // versione caricata dal server: usata per rilevare modifiche concorrenti di un altro admin
         let pinnedFolders = [];
         let highlightedNotes = {};
         let folderOrder = {}; // { parentId oppure 'root': [id1, id2, ...] } — ordine scelto via drag-and-drop
@@ -875,6 +878,7 @@
             const data = await res.json(); 
             systemUsers = data.users || []; 
             systemGroups = data.groups || []; 
+            groupsVersion = typeof data.groupsVersion === 'number' ? data.groupsVersion : null;
             originalSystemGroups = JSON.parse(JSON.stringify(systemGroups));
             renderGroupsList(); 
             document.getElementById('newGroupName').value = '';
@@ -905,9 +909,15 @@
                 // Prima si chiudeva il modale a prescindere dall'esito: se /api/admin/groups falliva
                 // (sessione scaduta, permessi, rete), l'utente credeva che le modifiche fossero salvate
                 // mentre in realtà erano andate perse in silenzio.
-                const saved = await saveGroupsToServer();
-                if (saved) {
+                const result = await saveGroupsToServer();
+                if (result === true) {
                     document.getElementById('groups-modal').style.display = 'none';
+                } else if (result === 'conflict') {
+                    // Qualcun altro ha salvato i gruppi nel frattempo: ricarica lo stato aggiornato
+                    // dal server invece di lasciare l'admin con una copia ormai obsoleta e nessuna
+                    // possibilità di procedere (le sue modifiche restano solo nella UI, da rifare).
+                    showToast(t('groups_conflict_error'), true);
+                    await openGroupsModal();
                 } else {
                     showToast(t('save_groups_error'), true);
                 }
@@ -924,9 +934,15 @@
                 const res = await fetch('/api/admin/groups', {
                     method: 'POST',
                     headers: authHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ groups: systemGroups })
+                    body: JSON.stringify({ groups: systemGroups, expectedVersion: groupsVersion })
                 });
-                return res.ok;
+                if (res.status === 409) {
+                    return 'conflict';
+                }
+                if (!res.ok) return false;
+                const data = await res.json();
+                groupsVersion = typeof data.groupsVersion === 'number' ? data.groupsVersion : groupsVersion;
+                return true;
             } catch (e) {
                 return false;
             }
