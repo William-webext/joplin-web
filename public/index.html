@@ -50,7 +50,9 @@
         .list-container { overflow-y: auto; flex-grow: 1; padding-bottom: 20px;}
         
         .folder-item { cursor: pointer; font-size: 13px; color: var(--text-main); }
-        .folder-title { padding: 6px 10px; display: flex; align-items: center; position: relative; }
+        .folder-title { padding: 6px 10px; display: flex; align-items: center; position: relative; cursor: grab; }
+        .folder-title.dragging { opacity: 0.4; }
+        .folder-title.drag-over { box-shadow: inset 0 2px 0 var(--accent-blue), inset 0 -2px 0 var(--accent-blue); }
         .folder-title:hover { background-color: var(--hover-bg); }
         .folder-title.active { background-color: var(--accent-blue); color: white; }
         .children-container { border-left: 1px solid var(--border-color); margin-left: 20px; }
@@ -537,6 +539,7 @@
         let originalSystemGroups = [];
         let pinnedFolders = [];
         let highlightedNotes = {};
+        let folderOrder = {}; // { parentId oppure 'root': [id1, id2, ...] } — ordine scelto via drag-and-drop
         
         let currentFolderId = null;
         let currentNoteId = null;
@@ -695,6 +698,7 @@
                 allNotes = [];
                 highlightedNotes = {};
                 pinnedFolders = [];
+                folderOrder = {};
                 expandedFolderIds.clear();
 
                 document.body.classList.remove('zen-mode');
@@ -769,11 +773,13 @@
                         const data = await res.json();
                         pinnedFolders = data.pinnedFolders || [];
                         highlightedNotes = data.highlightedNotes || {};
+                        folderOrder = data.folderOrder || {};
                     }
                 } catch(e) {}
             } else {
                 pinnedFolders = JSON.parse(localStorage.getItem('public_pinned') || '[]');
                 highlightedNotes = JSON.parse(localStorage.getItem('public_hl') || '{}');
+                folderOrder = JSON.parse(localStorage.getItem('public_folder_order') || '{}');
             }
 
             if (Array.isArray(highlightedNotes)) {
@@ -790,12 +796,13 @@
                     await fetch('/api/preferences', {
                         method: 'POST',
                         headers: authHeaders({ 'Content-Type': 'application/json' }),
-                        body: JSON.stringify({ pinnedFolders, highlightedNotes })
+                        body: JSON.stringify({ pinnedFolders, highlightedNotes, folderOrder })
                     });
                 } catch(e) {}
             } else {
                 localStorage.setItem('public_pinned', JSON.stringify(pinnedFolders));
                 localStorage.setItem('public_hl', JSON.stringify(highlightedNotes));
+                localStorage.setItem('public_folder_order', JSON.stringify(folderOrder));
             }
         }
 
@@ -1025,9 +1032,65 @@
                 else rootFolders.push(folderMap[f.id]);
             });
 
-            rootFolders.sort((a, b) => a.title.localeCompare(b.title));
+            // Alfabetico di default; se per quel livello (quel genitore, o 'root') esiste un ordine
+            // salvato dall'utente, quello vince. I taccuini nuovi che non compaiono ancora
+            // nell'ordine salvato finiscono in coda, ordinati alfabeticamente tra loro.
+            function orderFolders(list, parentKey) {
+                const customOrder = folderOrder[parentKey];
+                if (customOrder && customOrder.length > 0) {
+                    const indexMap = new Map(customOrder.map((id, idx) => [id, idx]));
+                    return [...list].sort((a, b) => {
+                        const ia = indexMap.has(a.id) ? indexMap.get(a.id) : Infinity;
+                        const ib = indexMap.has(b.id) ? indexMap.get(b.id) : Infinity;
+                        if (ia !== ib) return ia - ib;
+                        return a.title.localeCompare(b.title);
+                    });
+                }
+                return [...list].sort((a, b) => a.title.localeCompare(b.title));
+            }
 
-            function createFolderHTML(folder, forceOpen = false) {
+            function persistFolderOrder(parentKey, orderedIds) {
+                folderOrder[parentKey] = orderedIds;
+                savePreferences();
+            }
+
+            // Il drag-and-drop riordina solo tra fratelli dello stesso genitore (stesso parentKey):
+            // trascinare da un altro livello non ha effetto, per non rompere la gerarchia.
+            function attachDragHandlers(titleDiv, folder, parentKey, siblings) {
+                titleDiv.draggable = true;
+                titleDiv.addEventListener('dragstart', (e) => {
+                    e.stopPropagation();
+                    e.dataTransfer.setData('text/plain', folder.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    titleDiv.classList.add('dragging');
+                });
+                titleDiv.addEventListener('dragend', () => titleDiv.classList.remove('dragging'));
+                titleDiv.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    titleDiv.classList.add('drag-over');
+                });
+                titleDiv.addEventListener('dragleave', () => titleDiv.classList.remove('drag-over'));
+                titleDiv.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    titleDiv.classList.remove('drag-over');
+                    const draggedId = e.dataTransfer.getData('text/plain');
+                    if (!draggedId || draggedId === folder.id) return;
+
+                    const currentIds = siblings.map(f => f.id);
+                    const fromIdx = currentIds.indexOf(draggedId);
+                    const toIdx = currentIds.indexOf(folder.id);
+                    if (fromIdx === -1 || toIdx === -1) return; // trascinamento da un altro livello: ignorato
+
+                    currentIds.splice(fromIdx, 1);
+                    currentIds.splice(toIdx, 0, draggedId);
+                    persistFolderOrder(parentKey, currentIds);
+                    renderFolderTree();
+                });
+            }
+
+            function createFolderHTML(folder, parentKey, siblings, forceOpen = false) {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'folder-item';
                 
@@ -1075,12 +1138,23 @@
                     currentFolderId = folder.id;
                     const scopeSelect = document.getElementById('scopeSelect');
                     if (scopeSelect) scopeSelect.value = 'current';
+                    // Un risultato di ricerca del taccuino precedente non ha senso in quello appena
+                    // aperto: si riparte con la lista pulita invece di mostrare un filtro residuo.
+                    const searchInput = document.getElementById('searchInput');
+                    if (searchInput) searchInput.value = '';
                     updateTagDropdown(); updateNoteList(); showPanel('notes', true);
                 };
 
+                // Il drag-and-drop riordina solo la vista principale dell'albero, non la sezione
+                // preferiti (lì l'ordine è già quello di pinnedFolders, gestito a parte).
+                if (!forceOpen) {
+                    attachDragHandlers(titleDiv, folder, parentKey, siblings);
+                }
+
                 wrapper.appendChild(titleDiv);
                 if (!forceOpen && hasChildren) {
-                    folder.children.forEach(child => childrenContainer.appendChild(createFolderHTML(child)));
+                    const orderedChildren = orderFolders(folder.children, folder.id);
+                    orderedChildren.forEach(child => childrenContainer.appendChild(createFolderHTML(child, folder.id, orderedChildren)));
                     wrapper.appendChild(childrenContainer);
                 }
                 return wrapper;
@@ -1094,7 +1168,7 @@
 
                 pinnedFolders.forEach(fid => {
                     const f = allFolders.find(fold => fold.id === fid);
-                    if (f) container.appendChild(createFolderHTML(f, true));
+                    if (f) container.appendChild(createFolderHTML(f, 'root', [], true));
                 });
 
                 const sep = document.createElement('div');
@@ -1102,7 +1176,8 @@
                 container.appendChild(sep);
             }
 
-            rootFolders.forEach(root => container.appendChild(createFolderHTML(root)));
+            const orderedRoots = orderFolders(rootFolders, 'root');
+            orderedRoots.forEach(root => container.appendChild(createFolderHTML(root, 'root', orderedRoots)));
         }
 
         function updateTagDropdown() {
