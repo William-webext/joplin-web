@@ -6,6 +6,7 @@
     <title>Joplin Web Portal</title>
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
     <meta name="theme-color" content="#0e639c">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
@@ -52,7 +53,8 @@
         .list-container { overflow-y: auto; flex-grow: 1; padding-bottom: 20px;}
         
         .folder-item { cursor: pointer; font-size: 13px; color: var(--text-main); }
-        .folder-title { padding: 6px 10px; display: flex; align-items: center; position: relative; cursor: grab; }
+        .folder-title { padding: 6px 10px; display: flex; align-items: center; position: relative; }
+        .folder-title:active { cursor: grabbing; }
         .folder-title.dragging { opacity: 0.4; }
         .folder-title.drag-over { box-shadow: inset 0 2px 0 var(--accent-blue), inset 0 -2px 0 var(--accent-blue); }
         .folder-title:hover { background-color: var(--hover-bg); }
