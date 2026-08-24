@@ -33,6 +33,17 @@ sqliteDb.exec(`
     highlighted_notes TEXT
   );
 
+`);
+
+// CREATE TABLE IF NOT EXISTS non aggiunge colonne mancanti a una tabella già esistente da un
+// deploy precedente: serve una migrazione esplicita per chi aggiorna da una versione senza
+// folder_order. Il tentativo fallisce silenziosamente se la colonna esiste già (SQLite non
+// supporta ADD COLUMN IF NOT EXISTS su tutte le versioni in modo affidabile).
+try {
+  sqliteDb.exec('ALTER TABLE preferences ADD COLUMN folder_order TEXT');
+} catch (e) { /* colonna già presente: nessuna azione necessaria */ }
+
+sqliteDb.exec(`
   CREATE TABLE IF NOT EXISTS groups (
     id TEXT PRIMARY KEY,
     name TEXT,
@@ -349,39 +360,42 @@ app.get('/api/preferences', requireAuth, (req, res) => {
   const userId = req.auth.userId;
 
   try { 
-    const stmt = sqliteDb.prepare('SELECT pinned_folders, highlighted_notes FROM preferences WHERE user_id = ?');
+    const stmt = sqliteDb.prepare('SELECT pinned_folders, highlighted_notes, folder_order FROM preferences WHERE user_id = ?');
     const row = stmt.get(userId);
     
     if (row) {
       res.json({
         pinnedFolders: JSON.parse(row.pinned_folders || '[]'),
-        highlightedNotes: JSON.parse(row.highlighted_notes || '{}')
+        highlightedNotes: JSON.parse(row.highlighted_notes || '{}'),
+        folderOrder: JSON.parse(row.folder_order || '{}')
       });
     } else {
-      res.json({ pinnedFolders: [], highlightedNotes: {} });
+      res.json({ pinnedFolders: [], highlightedNotes: {}, folderOrder: {} });
     }
   } catch(e) { 
-    res.json({ pinnedFolders: [], highlightedNotes: {} }); 
+    res.json({ pinnedFolders: [], highlightedNotes: {}, folderOrder: {} }); 
   }
 });
 
 app.post('/api/preferences', requireAuth, (req, res) => {
-  const { pinnedFolders, highlightedNotes } = req.body;
+  const { pinnedFolders, highlightedNotes, folderOrder } = req.body;
   const userId = req.auth.userId; // non più preso dal body: impediva di scrivere le preferenze di un altro utente
 
   try {
     const stmt = sqliteDb.prepare(`
-      INSERT INTO preferences (user_id, pinned_folders, highlighted_notes)
-      VALUES (?, ?, ?)
+      INSERT INTO preferences (user_id, pinned_folders, highlighted_notes, folder_order)
+      VALUES (?, ?, ?, ?)
       ON CONFLICT(user_id) DO UPDATE SET
         pinned_folders = excluded.pinned_folders,
-        highlighted_notes = excluded.highlighted_notes
+        highlighted_notes = excluded.highlighted_notes,
+        folder_order = excluded.folder_order
     `);
     
     stmt.run(
       userId,
       JSON.stringify(pinnedFolders || []),
-      JSON.stringify(highlightedNotes || {})
+      JSON.stringify(highlightedNotes || {}),
+      JSON.stringify(folderOrder || {})
     );
     
     res.json({ success: true });
