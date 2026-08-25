@@ -289,10 +289,8 @@
             </div>
             <hr style="border-color: var(--border-color); margin: 18px 0;">
             <h4 style="color:var(--text-main); margin-bottom: 5px;" data-i18n="support_title">🐛 Report a problem / Ask for help</h4>
-            <p style="color:var(--text-muted); font-size: 12px; margin-top:0;" data-i18n="support_description">Your message goes straight to the maintainer. Leave your email if you'd like a reply.</p>
-            <input type="email" id="contactReplyTo" class="login-input" data-i18n-ph="contact_email_ph" placeholder="Your email (optional)">
-            <textarea id="contactMessage" class="login-input" style="min-height: 90px; resize: vertical; font-family: inherit;" data-i18n-ph="contact_message_ph" placeholder="Describe the problem or your question..."></textarea>
-            <button id="contactSubmitBtn" class="action-btn" style="background: var(--accent-blue); color: white; margin-top: 5px;" onclick="submitContactForm()" data-i18n="contact_submit_btn">Send message</button>
+            <p style="color:var(--text-muted); font-size: 12px; margin-top:0;" data-i18n="support_description">Write to the address below — happy to hear about bugs, ideas, or how you're using this.</p>
+            <p style="text-align:center; margin: 12px 0;"><a id="support-email-link" href="#" style="color:var(--accent-blue); font-size: 14px; font-weight:600; text-decoration:none;"></a></p>
             <button class="action-btn" style="margin-top: 10px;" onclick="closeAboutModal()" data-i18n="cancel_btn">Annulla</button>
         </div>
     </div>
@@ -440,11 +438,7 @@
                 about_description: "A read-only web viewer for your self-hosted Joplin notes — access your notebooks from any browser, on any device, without installing anything or leaving data behind after you close the tab.",
                 about_donation_pitch: "This project is free and open source, built and maintained in spare time. If it's useful to you, consider supporting its development — every contribution helps keep it going.",
                 support_title: "🐛 Report a problem / Ask for help",
-                support_description: "This opens your email app with the message ready to send.",
-                contact_email_ph: "Your email (optional)",
-                contact_message_ph: "Describe the problem or your question...",
-                contact_submit_btn: "Send message",
-                contact_empty_error: "Please write a message first.",
+                support_description: "Write to the address below — happy to hear about bugs, ideas, or how you're using this.",
                 scope_all: "🌍 Everywhere",
                 scope_current: "📁 Current notebook",
                 sort_recent: "🕒 Most recent",
@@ -534,11 +528,7 @@
                 about_description: "Un visualizzatore web in sola lettura per le tue note Joplin self-hosted — accedi ai tuoi notebook da qualsiasi browser, su qualsiasi dispositivo, senza installare nulla e senza lasciare dati dopo aver chiuso la scheda.",
                 about_donation_pitch: "Questo progetto è gratuito e open source, sviluppato e mantenuto nel tempo libero. Se ti è utile, considera di sostenerne lo sviluppo — ogni contributo aiuta a mantenerlo attivo.",
                 support_title: "🐛 Segnala un problema / Chiedi aiuto",
-                support_description: "Si apre il tuo client di posta con il messaggio già pronto da inviare.",
-                contact_email_ph: "La tua email (facoltativa)",
-                contact_message_ph: "Descrivi il problema o la tua domanda...",
-                contact_submit_btn: "Invia messaggio",
-                contact_empty_error: "Scrivi prima un messaggio.",
+                support_description: "Scrivi all'indirizzo qui sotto — felice di ricevere segnalazioni, idee, o sapere come lo usi.",
                 scope_all: "🌍 Ovunque",
                 scope_current: "📁 Taccuino attuale",
                 sort_recent: "🕒 Più recenti",
@@ -959,35 +949,22 @@
         function closeLoginModal() { document.getElementById('login-modal').style.display = 'none'; }
 
         function openAboutModal() {
+            // Indirizzo assemblato qui invece che scritto in chiaro nel markup HTML: non ferma chi
+            // ispeziona attivamente il codice con gli strumenti sviluppatore, ma evita che compaia
+            // leggibile nel sorgente statico della pagina per i bot più semplici che raschiano il
+            // testo cercando indirizzi email — resta comunque un vero link cliccabile e selezionabile
+            // per chi apre davvero questo pannello.
+            const email = ['joplin', 'rossodivino.com'].join('@');
+            const emailLink = document.getElementById('support-email-link');
+            if (emailLink) {
+                emailLink.href = 'mailto:' + email;
+                emailLink.innerText = email;
+            }
             document.getElementById('about-modal').style.display = 'flex';
         }
 
         function closeAboutModal() {
             document.getElementById('about-modal').style.display = 'none';
-        }
-
-        function submitContactForm() {
-            const messageInput = document.getElementById('contactMessage');
-            const replyToInput = document.getElementById('contactReplyTo');
-            const message = messageInput.value.trim();
-
-            if (!message) { showToast(t('contact_empty_error'), true); return; }
-
-            // Indirizzo assemblato qui invece che scritto in chiaro nel markup HTML: non ferma chi
-            // ispeziona attivamente il codice, ma evita che compaia leggibile nel sorgente della
-            // pagina per i bot che raschiano il testo cercando indirizzi email.
-            const to = ['joplin', 'rossodivino.com'].join('@');
-            const subject = 'Joplin Web Portal - Support request';
-            let body = message;
-            if (replyToInput.value.trim()) {
-                body += '\n\n— Reply to: ' + replyToInput.value.trim();
-            }
-
-            window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-
-            messageInput.value = '';
-            replyToInput.value = '';
-            closeAboutModal();
         }
 
         async function performLogin() {
