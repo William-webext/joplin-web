@@ -18,6 +18,7 @@
             --text-main: #d4d4d4;
             --text-muted: #8e9297;
             --accent-blue: #0e639c;
+            --link-color: #6cb6ff;
             --hover-bg: #353b42;
             --border-color: #3a3f45;
             --code-bg: #2d3139;
@@ -31,6 +32,7 @@
             --text-main: #1f2328;
             --text-muted: #636c76;
             --accent-blue: #0969da;
+            --link-color: #0969da;
             --hover-bg: #eaeef2;
             --border-color: #d0d7de;
             --code-bg: #f6f8fa;
@@ -128,10 +130,10 @@
         #editor h1 { font-size: 1.8em; margin-bottom: 0.5em; color: var(--text-main); }
         #note-breadcrumb { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
         .breadcrumb-segment { cursor: pointer; }
-        .breadcrumb-segment:hover { color: var(--accent-blue); text-decoration: underline; }
+        .breadcrumb-segment:hover { color: var(--link-color); text-decoration: underline; }
         .breadcrumb-sep { color: var(--text-muted); opacity: 0.5; }
-        #editor h2, #editor h3 { color: var(--accent-blue); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 30px; }
-        #editor a { color: var(--accent-blue); text-decoration: none; }
+        #editor h2, #editor h3 { color: var(--link-color); border-bottom: 1px solid var(--border-color); padding-bottom: 5px; margin-top: 30px; }
+        #editor a { color: var(--link-color); text-decoration: none; }
         #editor img { max-width: 100%; border-radius: 4px; cursor: zoom-in; }
 
         #editor pre { background: var(--code-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; overflow-x: auto; position: relative; }
