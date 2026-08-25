@@ -108,9 +108,9 @@ Either way, once it's reachable over HTTPS from outside your network, set `ALLOW
 
 Publishing a notebook is a two-click job from Joplin Desktop, once the plugin is installed: right-click a notebook → **Publish to Web** → choose public, private, or specific people/groups. The plugin talks directly to your portal's API — no manual database edits, no separate admin step.
 
-- 📦 Plugin repository: *link coming soon*
-- 🧩 Joplin plugin listing: *link coming soon, once published*
-- 📥 npm package: *link coming soon, once published*
+- 📦 Plugin repository: [github.com/william-webext/joplin-plugin-web-publisher](https://github.com/william-webext/joplin-plugin-web-publisher)
+- 🧩 Joplin plugin listing: [joplinapp.org/plugins/plugin/com.william.webppublisher](https://joplinapp.org/plugins/plugin/com.william.webppublisher/)
+- 📥 npm package: [npmjs.com/package/joplin-plugin-web-publisher](https://www.npmjs.com/package/joplin-plugin-web-publisher)
 
 ## Security notes
 
