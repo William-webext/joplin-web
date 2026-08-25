@@ -9,6 +9,7 @@ Read your notebooks from any browser, on any device — no app to install, nothi
 ![Self-hosted](https://img.shields.io/badge/self--hosted-yes-blue)
 ![Node](https://img.shields.io/badge/node-20-green)
 ![PWA](https://img.shields.io/badge/PWA-installable-informational)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](./LICENSE)
 
 </div>
 
@@ -94,29 +95,40 @@ Open `http://your-server:3000`, and you're in.
 | `ALLOWED_ORIGIN` | *(open)* | Restrict CORS to a specific origin, e.g. `https://notes.example.com` — recommended for production |
 | `TRUST_PROXY` | *(off)* | Set to `1` if you're running behind a reverse proxy or tunnel (Cloudflare Tunnel, nginx, etc.) — needed for accurate rate limiting by IP |
 
+## Going beyond your local network
+
+By default this runs on your local network only. If you want to reach it from outside — say, from your phone while you're out, or to actually use it as "open any browser, anywhere" — you need HTTPS in front of it. Two common, free ways to do that without exposing your NAS directly to the internet:
+
+- **[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)** — free, no port forwarding, no public IP needed. A small container (`cloudflared`) on your network creates an outbound connection to Cloudflare, which then serves your app over HTTPS on a domain of your choice. Works well with Docker Compose — add it as another service alongside `joplin-web`.
+- **A local reverse proxy container** (e.g. [Caddy](https://caddyserver.com/), [Traefik](https://traefik.io/), or [Nginx Proxy Manager](https://nginxproxymanager.com/)) if you'd rather manage your own certificates and port forwarding.
+
+Either way, once it's reachable over HTTPS from outside your network, set `ALLOWED_ORIGIN` to that exact domain and `TRUST_PROXY=1` — see the table above.
+
 ## The companion plugin
 
 Publishing a notebook is a two-click job from Joplin Desktop, once the plugin is installed: right-click a notebook → **Publish to Web** → choose public, private, or specific people/groups. The plugin talks directly to your portal's API — no manual database edits, no separate admin step.
 
-See [`/plugin`](./plugin) for installation instructions.
+- 📦 Plugin repository: *link coming soon*
+- 🧩 Joplin plugin listing: *link coming soon, once published*
+- 📥 npm package: *link coming soon, once published*
 
 ## Security notes
 
 - Sessions use random, server-signed tokens (never your Joplin password) with a sliding expiry — active users are never logged out mid-read
 - Every publish action is checked against real notebook ownership — you can only publish notebooks that are actually yours
-- Login and support endpoints are rate-limited per IP
+- Login endpoints are rate-limited per IP
 - All user-supplied content (note bodies, titles, tags) is sanitized before rendering — safe to publish notebooks that contain arbitrary Markdown/HTML from untrusted sources
 
 Found a security issue? Please report it privately rather than opening a public issue — see [Support](#support--feedback) below.
 
 ## Support / feedback
 
-Something broken, or a feature you'd like to see? Open the **ℹ️ About** panel inside the app — it has a form that opens your email client with everything pre-filled.
+Something broken, or a feature you'd like to see? Write to **joplin [at] rossodivino [dot] com** — happy to hear about bugs, ideas, or just what you're using this for.
 
 ## Support the project
 
-This project is free, open source, and maintained in spare time. If it's useful to you, there's a **☕ Support this project** button in the app (top toolbar) — every bit helps keep it going.
+This project is free, open source, and maintained in spare time. If it's useful to you, consider [buying me a coffee on PayPal](https://paypal.me/webext) — every bit helps keep it going. There's also a **☕ Support this project** button in the app itself (top toolbar).
 
 ## License
 
-*(License to be finalized before this repository is made public — see project notes.)*
+Licensed under the **[GNU Affero General Public License v3.0](./LICENSE)**. In short: you're free to use, modify, and self-host this software. If you modify it and offer it as a service to others — not just run it privately — you must make your modified source available too, under the same license. This applies to network use, not only distributed copies.
