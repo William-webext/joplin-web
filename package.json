@@ -8,7 +8,7 @@
   },
   "keywords": [],
   "author": "William Baglioni",
-  "license": "UNLICENSED",
+  "license": "AGPL-3.0-or-later",
   "type": "commonjs",
   "dependencies": {
     "bcryptjs": "^3.0.3",
