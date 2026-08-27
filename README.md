@@ -29,6 +29,7 @@ Joplin Web Portal solves exactly that: point any browser at your own server, log
 - 👥 **Group management** — an admin panel to organize users into groups and grant them access to specific notebooks
 - 📱 **Installable PWA** — add it to your phone's home screen or your desktop like a native app, with offline caching for notes you've already opened
 - 🔌 **Companion Joplin plugin** — publish a notebook straight from Joplin Desktop with a couple of clicks, no manual steps on the server side
+- 📧 **Optional email notifications** — let people know when a notebook is shared with them (all registered users, or just the newly added people/groups for custom access)
 - 🔎 Full-text search across titles, note content, and tags (multi-word, order-independent)
 - 📌 Pin favorite notebooks, drag-and-drop (or keyboard) reordering of your notebook tree
 - 🎨 Dark / light / system theme, adjustable reading width, Zen reading mode
@@ -73,6 +74,15 @@ services:
       DB_USER: joplinuser
       DB_PASSWORD: <your Postgres password>
       DB_NAME: joplin
+      # Optional — enables the "notify by email" checkbox when publishing a notebook.
+      # Leave these out entirely if you don't need it; the app works fine without them.
+      # SMTP_HOST: smtp.gmail.com
+      # SMTP_PORT: 587
+      # SMTP_SECURITY: starttls   # starttls | tls | off
+      # SMTP_USERNAME: you@example.com
+      # SMTP_PASSWORD: <smtp password or app password>
+      # SMTP_FROM: you@example.com
+      # PUBLIC_URL: https://notes.example.com   # recommended alongside the SMTP settings above
     volumes:
       - ./joplin-web-data:/app/data
     restart: on-failure:5
@@ -94,6 +104,13 @@ Open `http://your-server:3000`, and you're in.
 | `DATA_DIR` | `./data` | Where the portal's own SQLite database is stored |
 | `ALLOWED_ORIGIN` | *(open)* | Restrict CORS to a specific origin, e.g. `https://notes.example.com` — recommended for production |
 | `TRUST_PROXY` | *(off)* | Set to `1` if you're running behind a reverse proxy or tunnel (Cloudflare Tunnel, nginx, etc.) — needed for accurate rate limiting by IP |
+| `SMTP_HOST` | *(unset)* | SMTP server hostname — set this plus the other `SMTP_*` variables below to enable email notifications when a notebook is shared. Leave all of them unset to disable the feature entirely |
+| `SMTP_PORT` | `587` | SMTP server port |
+| `SMTP_SECURITY` | `starttls` | Connection security: `starttls`, `tls` (implicit TLS, typically port 465), or `off` (unencrypted, only for local/legacy SMTP) |
+| `SMTP_USERNAME` | — | SMTP account username |
+| `SMTP_PASSWORD` | — | SMTP account password (or app password, e.g. for Gmail) |
+| `SMTP_FROM` | *(same as `SMTP_USERNAME`)* | "From" address on notification emails |
+| `PUBLIC_URL` | *(guessed from the request)* | The link included in notification emails. The server tries to detect it automatically from the request, which works if `TRUST_PROXY=1` is set and your reverse proxy/tunnel forwards the protocol and host correctly (Cloudflare Tunnel does) — but not every setup does this reliably. **Recommended whenever you configure SMTP**, to be sure the link is always correct |
 
 ## Going beyond your local network
 
