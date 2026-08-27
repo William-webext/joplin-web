@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
+const nodemailer = require('nodemailer');
 
 const app = express();
 // Dietro un reverse proxy/tunnel (es. Cloudflare Tunnel), senza questo Express vede sempre
@@ -305,6 +306,67 @@ pool.on('error', (err) => {
   console.error('Errore imprevisto sul pool Postgres (connessione idle):', err.message);
 });
 
+// ==========================================
+// SMTP PER LE NOTIFICHE DI CONDIVISIONE
+// ==========================================
+// Configurabile via variabili d'ambiente nello stack, come per gli altri servizi (es. Vaultwarden).
+// A differenza di un indirizzo fisso, qui destinatario e configurazione sono per-installazione:
+// ogni admin usa il proprio SMTP, quindi ha senso richiederlo (diversamente dal form di supporto,
+// dove l'indirizzo di destinazione sarebbe stato fisso e la richiesta di configurazione SMTP
+// avrebbe reso il form inutilizzabile per chiunque tranne l'autore del progetto).
+function resolveSmtpSecureOptions(securityMode) {
+  switch ((securityMode || '').toLowerCase()) {
+    case 'tls':
+    case 'ssl':
+    case 'force_tls':
+      return { secure: true }; // TLS implicito fin dalla connessione, tipicamente porta 465
+    case 'off':
+    case 'none':
+      return { secure: false, requireTLS: false }; // nessuna cifratura — solo per SMTP locali/legacy
+    case 'starttls':
+    default:
+      return { secure: false, requireTLS: true }; // default più sicuro: STARTTLS, tipicamente porta 587
+  }
+}
+
+const SMTP_CONFIGURED = !!(process.env.SMTP_HOST && process.env.SMTP_USERNAME && process.env.SMTP_PASSWORD);
+let mailTransporter = null;
+if (SMTP_CONFIGURED) {
+  mailTransporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    auth: { user: process.env.SMTP_USERNAME, pass: process.env.SMTP_PASSWORD },
+    ...resolveSmtpSecureOptions(process.env.SMTP_SECURITY),
+  });
+} else {
+  console.warn('⚠️  SMTP non configurato: le notifiche di condivisione via email restano disattivate finché non imposti SMTP_HOST/SMTP_USERNAME/SMTP_PASSWORD.');
+}
+
+// Usato per costruire il link nell'email di notifica. Se non impostato, si prova a ricavarlo dalla
+// richiesta stessa (funziona nella maggior parte dei casi, ma dietro un tunnel/proxy il risultato
+// può essere impreciso — impostarlo esplicitamente evita ambiguità).
+function resolvePublicUrl(req) {
+  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/$/, '');
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+async function sendShareNotification(req, recipients, folderTitle) {
+  if (!SMTP_CONFIGURED || !mailTransporter || !recipients || recipients.length === 0) return;
+  const portalUrl = resolvePublicUrl(req);
+  try {
+    await mailTransporter.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USERNAME,
+      bcc: recipients, // BCC: i destinatari non devono vedere l'elenco degli altri destinatari
+      subject: `A notebook has been shared with you: "${folderTitle}"`,
+      text: `A notebook titled "${folderTitle}" has been shared with you.\n\nOpen it here: ${portalUrl}\n\nLog in with your existing account to view it.`
+    });
+  } catch (err) {
+    // Un errore di invio non deve mai far fallire la pubblicazione, che a questo punto è già
+    // andata a buon fine — la notifica è un extra, non una condizione bloccante.
+    console.error('sendShareNotification: invio fallito:', err.message);
+  }
+}
+
 // Con l'auth ora a token in Authorization header (non più cookie), il wildcard "*" non permette
 // più a siti terzi di leggere risposte autenticate della vittima (il token non è accessibile
 // cross-origin). Resta comunque buona norma restringere l'origine invece di lasciarla aperta a tutti:
@@ -476,7 +538,7 @@ app.get('/api/published-list', requireAuth, (req, res) => {
 });
 
 app.post('/api/publish', loginRateLimit, async (req, res) => {
-  const { auth, folder, folders, notes, updateOnlyVisibility } = req.body;
+  const { auth, folder, folders, notes, updateOnlyVisibility, notifyEmails } = req.body;
   const user = await findAuthenticatedUser(auth && auth.email, auth && auth.password);
   if (!user) return res.status(401).json({ error: 'Authentication failed.' });
   const targetFolders = folders || (folder ? [folder] : []);
@@ -509,6 +571,16 @@ app.post('/api/publish', loginRateLimit, async (req, res) => {
   }
   savePublishedData(currentData);
   res.json({ success: true });
+
+  // Dopo la risposta: la notifica è un extra, non deve ritardare né condizionare l'esito della
+  // pubblicazione (già salvata e confermata al chiamante sopra). Solo per pubblicazioni vere e
+  // proprie, non per 'remove' — non ha senso notificare qualcuno che una condivisione è stata tolta.
+  if (targetFolders[0].visibility !== 'remove' && Array.isArray(notifyEmails) && notifyEmails.length > 0) {
+    const validEmails = notifyEmails
+      .filter(e => typeof e === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
+      .slice(0, 100); // tetto di sicurezza, non un vincolo che ci si aspetta di raggiungere in uso normale
+    sendShareNotification(req, validEmails, targetFolders[0].title || 'Untitled');
+  }
 });
 
 app.post('/api/login', loginRateLimit, async (req, res) => {
