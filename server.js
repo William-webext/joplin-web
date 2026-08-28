@@ -44,6 +44,12 @@ try {
   sqliteDb.exec('ALTER TABLE preferences ADD COLUMN folder_order TEXT');
 } catch (e) { /* colonna già presente: nessuna azione necessaria */ }
 
+// Stessa migrazione lazy per i tag delle note pubblicate: prima non venivano salvati affatto,
+// una nota pubblicata perdeva sempre i suoi tag Joplin reali.
+try {
+  sqliteDb.exec('ALTER TABLE published_notes ADD COLUMN tags TEXT');
+} catch (e) { /* colonna già presente: nessuna azione necessaria */ }
+
 sqliteDb.exec(`
   CREATE TABLE IF NOT EXISTS groups (
     id TEXT PRIMARY KEY,
@@ -162,7 +168,7 @@ function requireAdmin(req, res, next) {
 function getPublishedData() {
   try {
     const foldersRows = sqliteDb.prepare('SELECT id, parent_id, title, visibility, allowed_users, allowed_groups, updated_at FROM published_folders').all();
-    const notesRows = sqliteDb.prepare('SELECT id, parent_id, title, body, updated_time FROM published_notes').all();
+    const notesRows = sqliteDb.prepare('SELECT id, parent_id, title, body, updated_time, tags FROM published_notes').all();
 
     const folders = foldersRows.map(f => ({
       id: f.id,
@@ -179,7 +185,8 @@ function getPublishedData() {
       parent_id: n.parent_id || '',
       title: n.title || '',
       body: n.body || '',
-      updated_time: Number(n.updated_time || Date.now())
+      updated_time: Number(n.updated_time || Date.now()),
+      tags: JSON.parse(n.tags || '[]')
     }));
 
     return { folders, notes };
@@ -201,8 +208,8 @@ function savePublishedData(data) {
 
   const deleteNotes = sqliteDb.prepare('DELETE FROM published_notes');
   const insertNote = sqliteDb.prepare(`
-    INSERT INTO published_notes (id, parent_id, title, body, updated_time)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO published_notes (id, parent_id, title, body, updated_time, tags)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
 
   const transaction = sqliteDb.transaction((pubData) => {
@@ -229,7 +236,8 @@ function savePublishedData(data) {
           n.parent_id || '',
           n.title || '',
           n.body || '',
-          Number(n.updated_time || Date.now())
+          Number(n.updated_time || Date.now()),
+          JSON.stringify(n.tags || [])
         );
       }
     }
@@ -567,7 +575,7 @@ app.post('/api/publish', loginRateLimit, async (req, res) => {
     currentData.folders = currentData.folders.filter(f => !folderIds.includes(f.id));
     currentData.notes = currentData.notes.filter(n => !folderIds.includes(n.parent_id));
     targetFolders.forEach(tf => currentData.folders.push({ id: tf.id, parent_id: tf.parent_id || '', title: tf.title, visibility: tf.visibility || 'private', allowedUsers: tf.allowedUsers || [], allowedGroups: tf.allowedGroups || [], updated_at: Date.now() }));
-    if (Array.isArray(notes)) notes.forEach(n => currentData.notes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.user_updated_time || n.updated_time || Date.now() }));
+    if (Array.isArray(notes)) notes.forEach(n => currentData.notes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.user_updated_time || n.updated_time || Date.now(), tags: n.tags || [] }));
   }
   savePublishedData(currentData);
   res.json({ success: true });
@@ -693,7 +701,7 @@ app.get('/api/data', optionalAuth, async (req, res) => {
   const snapshotPublishedNoteIds = new Set(); // note aggiunte SOLO perché nello snapshot: se la query live sotto non le riconferma, vanno tolte
   publishedData.notes.filter(n => visiblePublishedFolderIds.includes(n.parent_id)).forEach(n => {
     if (!noteIdsSet.has(n.id)) {
-      allNotes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.updated_time, tags: ['__published_tag__'] });
+      allNotes.push({ id: n.id, parent_id: n.parent_id, title: n.title, body: n.body, updated_time: n.updated_time, tags: [...(n.tags || []), '__published_tag__'] });
       noteIdsSet.add(n.id);
       snapshotPublishedNoteIds.add(n.id);
     }
@@ -728,6 +736,33 @@ app.get('/api/data', optionalAuth, async (req, res) => {
       liveQuerySucceeded = true;
     } catch (err) {
       console.error('/api/data (note pubblicate aggiornate live): errore nella query a Postgres:', err.message);
+    }
+
+    // Senza questo, i tag delle note pubblicate restavano congelati al momento della pubblicazione
+    // (o assenti del tutto), mentre titolo e corpo si aggiornano già in automatico qui sopra —
+    // incoerente. Riusa tags/noteTags già caricati per un utente autenticato (evita una query
+    // duplicata); per un visitatore pubblico, dove quelle liste sono ancora vuote, le recupera qui.
+    if (liveQuerySucceeded && liveConfirmedNoteIds.size > 0) {
+      try {
+        if (tags.length === 0 && noteTags.length === 0) {
+          const tagsResult = await pool.query(`SELECT jop_id, jop_type, content FROM items WHERE jop_type IN (5, 6)`);
+          tagsResult.rows.forEach(row => {
+            let parsed = {};
+            try { parsed = JSON.parse(row.content.toString('utf-8')); } catch (e) { return; }
+            if (row.jop_type === 5) tags.push({ id: row.jop_id, title: parsed.title || '__untitled_tag__' });
+            else if (row.jop_type === 6) noteTags.push({ note_id: parsed.note_id, tag_id: parsed.tag_id });
+          });
+        }
+        allNotes.forEach(n => {
+          if (liveConfirmedNoteIds.has(n.id)) {
+            const myTagIds = noteTags.filter(nt => nt.note_id === n.id).map(nt => nt.tag_id);
+            const realTags = tags.filter(t => myTagIds.includes(t.id)).map(t => t.title);
+            n.tags = [...realTags, '__published_tag__'];
+          }
+        });
+      } catch (err) {
+        console.error('/api/data (tag delle note pubblicate): errore nella query a Postgres:', err.message);
+      }
     }
 
     // Solo se la query live è andata a buon fine: senza questa condizione, un errore di Postgres
