@@ -178,11 +178,10 @@
         #toast.show { opacity: 1; visibility: visible; }
 
         body.zen-mode #sidebar, body.zen-mode #notes-list, body.zen-mode .resizer, body.zen-mode .editor-toolbar { display: none !important; }
-        #zen-exit-btn {
+        #zen-exit-btn, #zen-width-btn {
             display: none;
             position: fixed;
             top: 12px;
-            right: 12px;
             z-index: 500;
             background: var(--bg-sidebar);
             border: 1px solid var(--border-color);
@@ -193,7 +192,9 @@
             cursor: pointer;
             font-size: 14px;
         }
-        body.zen-mode #zen-exit-btn { display: block; }
+        #zen-exit-btn { right: 12px; }
+        #zen-width-btn { right: 54px; font-size: 12px; }
+        body.zen-mode #zen-exit-btn, body.zen-mode #zen-width-btn { display: block; }
 
         @media print {
             @page { margin: 1.5cm; size: auto; }
@@ -364,6 +365,7 @@
 
     <div id="editor">
         <button id="zen-exit-btn" onclick="toggleZenMode()" data-i18n-title="exit_zen_title" data-i18n-aria="exit_zen_title" aria-label="Exit Zen Mode">✕</button>
+        <button id="zen-width-btn" onclick="toggleReadingWidth()">↔️</button>
         <button class="mobile-back-btn" onclick="history.back()" data-i18n="back_notes">🔙 Notes</button>
         <div class="editor-toolbar">
             <div style="display:flex; gap:8px;">
@@ -806,11 +808,16 @@
         }
 
         function updateReadingWidthBtnLabel() {
-            const btn = document.getElementById('width-toggle-btn');
-            if (!btn) return;
             const isFull = document.body.classList.contains('full-width-reading');
-            btn.innerText = isFull ? t('width_comfortable_btn') : t('width_full_btn');
-            btn.title = isFull ? t('width_comfortable_btn') : t('width_full_btn');
+            const label = isFull ? t('width_comfortable_btn') : t('width_full_btn');
+
+            const btn = document.getElementById('width-toggle-btn');
+            if (btn) { btn.innerText = label; btn.title = label; }
+
+            // Pulsante circolare in zen mode: spazio insufficiente per il testo, resta la sola
+            // icona ↔️, ma title/aria-label restano descrittivi per chi passa il mouse o usa uno screen reader.
+            const zenBtn = document.getElementById('zen-width-btn');
+            if (zenBtn) { zenBtn.title = label; zenBtn.setAttribute('aria-label', label); }
         }
 
         function toggleZenMode() {
