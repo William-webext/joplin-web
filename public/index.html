@@ -728,6 +728,7 @@
                     if (groupsModal && groupsModal.style.display === 'flex') cancelGroupsModal();
                     const aboutModal = document.getElementById('about-modal');
                     if (aboutModal && aboutModal.style.display === 'flex') closeAboutModal();
+                    if (document.body.classList.contains('zen-mode')) toggleZenMode();
                     document.getElementById('context-menu').style.display = 'none';
                     document.getElementById('toc-menu').style.display = 'none';
                     return;
